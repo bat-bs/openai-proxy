@@ -1,0 +1,187 @@
+package apiproxy
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"openai-api-proxy/api"
+	"os"
+	"strings"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+// type clientConfig struct {
+
+// }
+
+type AzureConfig struct {
+	DeploymentName string
+	ApiVersion     string
+	RessourceName  string
+	BaseUrl        string
+	ApiKey         string
+}
+
+var (
+	authHeader = "Authorization"
+	// hostDst        = "0.0.0.0"
+	defaultBackend = "openai"
+)
+
+// hostTarget maps hostnames to their corresponding backend server URLs.
+var (
+	OpenAIbackendService = map[string]string{
+		// "azure": "", // see SetAzureUrl
+		"openai":     "https://api.openai.com/",
+		"openrouter": "https://openrouter.ai/api/",
+	}
+
+	backendProxy = make(map[string]*httputil.ReverseProxy)
+)
+
+func Init(mux *http.ServeMux) {
+	// Setup Azure Vars and Connection String
+	azconf := &AzureConfig{
+		DeploymentName: os.Getenv("DEPLOYMENT_NAME"),
+		ApiVersion:     os.Getenv("API_VERSION"),
+		RessourceName:  os.Getenv("RESSOURCE_NAME"),
+		BaseUrl:        os.Getenv("BASE_URL"),
+	}
+	defaultBackend = os.Getenv("DEFAULT_BACKEND")
+
+	h := &baseHandle{azconf}
+	mux.Handle("/api/", h)
+
+}
+
+type baseHandle struct {
+	az *AzureConfig
+}
+
+func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	backend := r.Header.Get("Backend")
+	r.Header.Del("Backend")
+	log.Println(r.Header.Get("Content-Type"))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	//Caching deactivated for testing
+	if fn, ok := backendProxy[backend]; ok {
+		fn.ServeHTTP(w, r)
+		return
+	}
+
+	// See if backend is OpenAI compatible
+	_, ok := OpenAIbackendService[backend]
+
+	if ok {
+		h.HandleOpenAI(w, r, backend)
+		return
+	}
+	if backend == "azure" {
+		h.HandleAzure(w, r, backend)
+		return
+	}
+
+	if backend == "" {
+		log.Printf("No backend specified, the default backend (%s) will be used.", defaultBackend)
+		if defaultBackend == "azure" {
+			h.HandleAzure(w, r, defaultBackend)
+			return
+		} else {
+			h.HandleOpenAI(w, r, defaultBackend)
+			return
+		}
+	}
+
+	w.Write([]byte("404: Backend not found "))
+}
+
+// function to handle 1:1 OpenAI compatible apis
+func (h *baseHandle) HandleOpenAI(w http.ResponseWriter, r *http.Request, backend string) {
+	token, err := ValidateToken(r)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	r.Header.Set(authHeader, "Bearer "+token)
+	remoteUrl, err := url.Parse(backend)
+	log.Printf("Received Request for Backend %s for remoteURL %s", backend, remoteUrl)
+	if err != nil {
+		log.Println("backend parse fail:", err)
+		return
+	}
+	proxy := httputil.NewSingleHostReverseProxy(remoteUrl)
+	backendProxy[r.Host] = proxy
+	proxy.ServeHTTP(w, r)
+}
+
+// Since OpenAI and Azure API are not really compatible, we need 2 different handler functions
+func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend string) {
+	azureToken, err := ValidateToken(r)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Api-Key", azureToken)
+
+	remoteUrl := h.SetAzureUrl(r)
+
+	log.Printf("Received Request for Backend %s for remoteURL %s", backend, remoteUrl)
+	proxy := httputil.NewSingleHostReverseProxy(remoteUrl)
+	r.Host = remoteUrl.Host
+	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
+
+	backendProxy[r.Host] = proxy
+
+	// Before proxying, log the intended complete URL.
+	actualURL := *remoteUrl // Make a copy of the URL struct
+	actualURL.Path = r.URL.Path
+	actualURL.RawQuery = r.URL.RawQuery
+	log.Printf("Proxying request to Azure backend: %s", actualURL.String())
+
+	proxy.ServeHTTP(w, r)
+}
+
+func (h *baseHandle) SetAzureUrl(r *http.Request) *url.URL {
+	r.Header.Del(authHeader)
+	azureUrl := fmt.Sprintf("https://%s.%s/openai/deployments/%s", h.az.DeploymentName, h.az.BaseUrl, h.az.RessourceName)
+	log.Println("Set Azure URL to ", azureUrl)
+	url, err := url.Parse(azureUrl)
+	if err != nil {
+		log.Println("target parse fail:", err)
+		return nil
+	}
+	return url
+
+}
+
+func ValidateToken(r *http.Request) (string, error) {
+	azureApiKey := os.Getenv("AZURE_API_KEY")
+	header := r.Header.Get(authHeader)
+	apiKey := strings.TrimPrefix(header, "Bearer: ")
+
+	db := api.NewDB()
+
+	hashes, err := db.LookupApiKeys()
+	if err != nil {
+		log.Println("Error while comparing Incoming API Request API Key with DB", err)
+	}
+
+	for _, hash := range hashes {
+		err := bcrypt.CompareHashAndPassword([]byte(hash.ApiKey), []byte(apiKey))
+		log.Printf("Compared %s with %s", apiKey, hash.ApiKey)
+		if err == nil {
+			return azureApiKey, nil
+		}
+	}
+	err = fmt.Errorf("received invalid bearer token")
+
+	return "", err
+}

@@ -1,0 +1,62 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HTMX Table with TailwindCSS</title>
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.16/dist/tailwind.min.css" rel="stylesheet">
+
+<script src="https://unpkg.com/htmx.org"></script>
+
+<style>
+</style>
+
+</head>
+<body class="bg-gray-100 p-10">
+<h1 class="text-3xl font-bold mb-6">HTMX Table with TailwindCSS</h1>
+
+
+
+<!-- Container for the popup -->
+<div id="popup-container" class="hidden fixed inset-0 z-10 bg-gray-500 bg-opacity-75 flex items-center justify-center">
+    <div class="bg-white p-4 rounded-lg shadow-lg">
+        <!-- Content from the server response will be inserted here -->
+        <div id="popup-content"></div>
+
+        <!-- Close button -->
+        <button id="close-popup" class="mt-2 bg-red-500 text-white px-3 py-1 rounded hover:bg-red-700">Close</button>
+    </div>
+</div>
+
+
+<!-- HTMX endpoint call for table data -->
+<div hx-get="/api2/table/get" class="form-control" hx-swap="innerHTML" hx-trigger="load, submit from:table-container" hx-target="#table-container">
+    <p>Loading...</p>
+</div>
+
+<!-- Table container for HTMX response -->
+<div id="table-container">
+    <button type="submit" id="save"></button>
+</div>
+
+<script>
+    document.body.addEventListener('htmx:afterSwap', function(event) {
+        // Check if the target of the htmx call was the popup content container
+        if (event.detail.elt.id === 'popup-content') {
+            // Show the popup
+            document.getElementById('popup-container').classList.remove('hidden');
+        } else {
+            // Hide the popup
+            document.getElementById('popup-container').classList.add('hidden');
+        }
+    });
+
+    // Add a click event listener to the close button to hide the popup
+    document.getElementById('close-popup').addEventListener('click', function() {
+        document.getElementById('popup-container').classList.add('hidden');
+    });
+</script>
+
+ </body> </html>
+
+ 
