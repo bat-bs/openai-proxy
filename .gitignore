@@ -1,2 +1,3 @@
 .env
 apiproxy.sqlite
+apgiproxy.sqlite

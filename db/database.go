@@ -16,6 +16,7 @@ type Database struct {
 }
 
 type ApiKey struct {
+	UUID        string
 	ApiKey      string
 	Owner       string
 	AiApi       string // can be openai or azure
@@ -91,7 +92,7 @@ func (d *Database) LookupDatabasePath() string {
 }
 
 func (d *Database) WriteEntry(a *ApiKey) {
-	_, err := d.db.Exec("INSERT INTO apiKeys VALUES (?, ?, ?, ?)", a.ApiKey, a.Owner, a.AiApi, a.Description)
+	_, err := d.db.Exec("INSERT INTO apiKeys VALUES (?, ?, ?, ?, ?)", a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description)
 	if err != nil {
 		log.Printf("Insert Failed: %v", err)
 		return
@@ -99,7 +100,7 @@ func (d *Database) WriteEntry(a *ApiKey) {
 }
 func (d *Database) DeleteEntry(key *string) {
 	log.Println("Deleting Key ", *key)
-	_, err := d.db.Exec("DELETE FROM apiKeys WHERE ApiKey=?", *key)
+	_, err := d.db.Exec("DELETE FROM apiKeys WHERE UUID=?", *key)
 	if err != nil {
 		log.Printf("Delete Failed: %v", err)
 		return
@@ -109,14 +110,14 @@ func (d *Database) DeleteEntry(key *string) {
 
 func (d *Database) LookupApiKeyInfos() ([]ApiKey, error) {
 	var apikeys []ApiKey
-	rows, err := d.db.Query("SELECT ApiKey,Owner,AiApi,Description FROM apiKeys")
+	rows, err := d.db.Query("SELECT UUID,Owner,AiApi,Description FROM apiKeys")
 	if err != nil {
 		return nil, err
 	}
 
 	for rows.Next() {
 		var a ApiKey
-		if err := rows.Scan(&a.ApiKey, &a.Owner, &a.AiApi, &a.Description); err != nil {
+		if err := rows.Scan(&a.UUID, &a.Owner, &a.AiApi, &a.Description); err != nil {
 			return apikeys, err
 		}
 		apikeys = append(apikeys, a)

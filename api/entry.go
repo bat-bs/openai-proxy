@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -34,8 +35,10 @@ func hashToken(token string) string {
 
 func (e *EntryCreate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
+	uuid := uuid.NewString()
 	apikey := generateToken(32)
 	h := db.ApiKey{
+		UUID:        uuid,
 		ApiKey:      hashToken(apikey),
 		Owner:       r.Form.Get("owner"),
 		AiApi:       r.Form.Get("apitype"),

@@ -5,8 +5,6 @@ import (
 	"log"
 	"net/http"
 	db "openai-api-proxy/db"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func ApiInit(mux *http.ServeMux) {
