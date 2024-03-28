@@ -4,12 +4,13 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	db "openai-api-proxy/db"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 func ApiInit(mux *http.ServeMux) {
-	db := DatabaseInit()
+	db := db.NewDB()
 	mux.Handle("/api2/table/get", &ApiHandler{db})
 	mux.Handle("/api2/table/entry/save", &EntryCreate{db})
 	mux.Handle("/api2/table/entry/delete/", &EntryDelete{db})
@@ -17,30 +18,7 @@ func ApiInit(mux *http.ServeMux) {
 }
 
 type ApiHandler struct {
-	db *Database
-}
-
-type ApiKey struct {
-	ApiKey      string
-	Owner       string
-	AiApi       string // can be openai or azure
-	Description string //optional
-}
-
-func DatabaseInit() *Database {
-	createTable := `
-	CREATE TABLE IF NOT EXISTS apiKeys (
-		ApiKey      TEXT NOT NULL PRIMARY KEY,
-		Owner       TEXT,
-		AiApi       TEXT,
-		Description TEXT
-	);`
-	d := NewDB()
-	if _, err := d.db.Exec(createTable); err != nil {
-		log.Fatal(err)
-	}
-	return d
-
+	db *db.Database
 }
 
 func (h *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	api "openai-api-proxy/api"
 	proxy "openai-api-proxy/apiproxy"
+	db "openai-api-proxy/db"
 	web "openai-api-proxy/webui"
 
 	"github.com/joho/godotenv"
@@ -16,6 +17,7 @@ func main() {
 	if err != nil {
 		log.Println("Error loading Env File", err)
 	}
+	db.DatabaseInit()
 	mux := http.NewServeMux()
 	proxy.Init(mux)     // Start AI Proxy
 	go web.Init(mux)    // Start Web UI

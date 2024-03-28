@@ -6,11 +6,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"openai-api-proxy/api"
 	"os"
 	"strings"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 // type clientConfig struct {
@@ -103,11 +100,11 @@ func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // function to handle 1:1 OpenAI compatible apis
 func (h *baseHandle) HandleOpenAI(w http.ResponseWriter, r *http.Request, backend string) {
-	token, err := ValidateToken(r)
-	if err != nil {
-		log.Println(err)
+	token := ValidateToken(w, r)
+	if token == "" {
 		return
 	}
+
 	r.Header.Set(authHeader, "Bearer "+token)
 	remoteUrl, err := url.Parse(backend)
 	log.Printf("Received Request for Backend %s for remoteURL %s", backend, remoteUrl)
@@ -122,9 +119,8 @@ func (h *baseHandle) HandleOpenAI(w http.ResponseWriter, r *http.Request, backen
 
 // Since OpenAI and Azure API are not really compatible, we need 2 different handler functions
 func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend string) {
-	azureToken, err := ValidateToken(r)
-	if err != nil {
-		log.Println(err)
+	azureToken := ValidateToken(w, r)
+	if azureToken == "" {
 		return
 	}
 
@@ -160,28 +156,4 @@ func (h *baseHandle) SetAzureUrl(r *http.Request) *url.URL {
 	}
 	return url
 
-}
-
-func ValidateToken(r *http.Request) (string, error) {
-	azureApiKey := os.Getenv("AZURE_API_KEY")
-	header := r.Header.Get(authHeader)
-	apiKey := strings.TrimPrefix(header, "Bearer: ")
-
-	db := api.NewDB()
-
-	hashes, err := db.LookupApiKeys()
-	if err != nil {
-		log.Println("Error while comparing Incoming API Request API Key with DB", err)
-	}
-
-	for _, hash := range hashes {
-		err := bcrypt.CompareHashAndPassword([]byte(hash.ApiKey), []byte(apiKey))
-		log.Printf("Compared %s with %s", apiKey, hash.ApiKey)
-		if err == nil {
-			return azureApiKey, nil
-		}
-	}
-	err = fmt.Errorf("received invalid bearer token")
-
-	return "", err
 }

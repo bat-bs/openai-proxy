@@ -5,6 +5,7 @@ import (
 	"encoding/base32"
 	"log"
 	"net/http"
+	db "openai-api-proxy/db"
 	"strings"
 	"text/template"
 
@@ -12,7 +13,7 @@ import (
 )
 
 type EntryCreate struct {
-	db *Database
+	db *db.Database
 }
 
 func generateToken(length int) string {
@@ -34,7 +35,7 @@ func hashToken(token string) string {
 func (e *EntryCreate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	apikey := generateToken(32)
-	h := ApiKey{
+	h := db.ApiKey{
 		ApiKey:      hashToken(apikey),
 		Owner:       r.Form.Get("owner"),
 		AiApi:       r.Form.Get("apitype"),
@@ -69,7 +70,7 @@ func (e *EntryCreate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type EntryDelete struct {
-	db *Database
+	db *db.Database
 }
 
 func (e *EntryDelete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
