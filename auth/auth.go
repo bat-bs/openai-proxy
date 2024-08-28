@@ -66,7 +66,6 @@ type Auth struct {
 	oauth2Config *oauth2.Config
 	ctx          context.Context
 	verifier     *oidc.IDTokenVerifier
-	userClaims   *Claims
 }
 
 func (a *Auth) LoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -114,24 +113,33 @@ func (a *Auth) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: "session_token", Path: "/", Value: rawIDToken})
 	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 }
+
+func (a *Auth) GetClaims(r *http.Request) (*Claims, error) {
+	var err error
+	// Parse and verify ID Token payload.
+	rawIDToken, err := r.Cookie("session_token")
+	idToken, err := a.verifier.Verify(a.ctx, rawIDToken.Value)
+	claims := &Claims{}
+	// Extract custom claims
+	if err = idToken.Claims(claims); err != nil {
+		log.Println("Error Extracting User-Claim", err)
+		return nil, err
+		// handle error
+	}
+	return claims, nil
+}
 func (a *Auth) ValidateSessionToken(w http.ResponseWriter, r *http.Request) bool {
 	// Parse and verify ID Token payload.
 	rawIDToken, err := r.Cookie("session_token")
 	if err != nil || rawIDToken == nil {
 		return false
 	}
-	idToken, err := a.verifier.Verify(a.ctx, rawIDToken.Value)
+	_, err = a.verifier.Verify(a.ctx, rawIDToken.Value)
 	if err != nil {
 		log.Println("Session Token Wrong")
 		http.Redirect(w, r, "/login/", http.StatusTemporaryRedirect)
 		return false
 	}
 
-	// Extract custom claims
-	if err := idToken.Claims(&a.userClaims); err != nil {
-		log.Println("Claims Wrong", err)
-		return false
-		// handle error
-	}
 	return true
 }

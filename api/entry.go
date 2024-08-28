@@ -35,13 +35,20 @@ func (a *ApiHandler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 		a.Unauthenticated(w, r)
 		return
 	}
+
+	claims, err := a.auth.GetClaims(r)
+	if err != nil {
+		// If Claims Extraction Failed, user will be Redirected to Update his Token.
+		a.Unauthenticated(w, r)
+	}
+
 	r.ParseForm()
 	uuid := uuid.NewString()
 	apikey := a.generateToken(32)
 	h := db.ApiKey{
 		UUID:        uuid,
 		ApiKey:      a.hashToken(apikey),
-		Owner:       r.Form.Get("owner"),
+		Owner:       claims.Sub,
 		AiApi:       r.Form.Get("apitype"),
 		Description: r.Form.Get("beschreibung"),
 	}
@@ -79,6 +86,13 @@ func (a *ApiHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		a.Unauthenticated(w, r)
 		return
 	}
+
+	claims, err := a.auth.GetClaims(r)
+	if err != nil {
+		// If Claims Extraction Failed, user will be Redirected to Update his Token.
+		a.Unauthenticated(w, r)
+	}
+
 	key := strings.TrimPrefix(r.URL.Path, "/api2/table/entry/delete/")
-	a.db.DeleteEntry(&key)
+	a.db.DeleteEntry(&key, claims.Sub)
 }

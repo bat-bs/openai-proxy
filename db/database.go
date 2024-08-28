@@ -98,9 +98,9 @@ func (d *Database) WriteEntry(a *ApiKey) {
 		return
 	}
 }
-func (d *Database) DeleteEntry(key *string) {
+func (d *Database) DeleteEntry(key *string, uid string) {
 	log.Println("Deleting Key ", *key)
-	_, err := d.db.Exec("DELETE FROM apiKeys WHERE UUID=?", *key)
+	_, err := d.db.Exec("DELETE FROM apiKeys WHERE UUID=? AND Owner=?", *key, uid)
 	if err != nil {
 		log.Printf("Delete Failed: %v", err)
 		return
@@ -108,9 +108,9 @@ func (d *Database) DeleteEntry(key *string) {
 
 }
 
-func (d *Database) LookupApiKeyInfos() ([]ApiKey, error) {
+func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
-	rows, err := d.db.Query("SELECT UUID,Owner,AiApi,Description FROM apiKeys")
+	rows, err := d.db.Query("SELECT UUID,Owner,AiApi,Description FROM apiKeys WHERE Owner=?", uid)
 	if err != nil {
 		return nil, err
 	}
@@ -125,9 +125,9 @@ func (d *Database) LookupApiKeyInfos() ([]ApiKey, error) {
 	return apikeys, nil
 }
 
-func (d *Database) LookupApiKeys() ([]ApiKey, error) {
+func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
-	rows, err := d.db.Query("SELECT ApiKey,Owner FROM apiKeys")
+	rows, err := d.db.Query("SELECT ApiKey,Owner FROM apiKeys WHERE Owner=?", uid)
 	if err != nil {
 		return nil, err
 	}

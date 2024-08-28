@@ -37,7 +37,7 @@ func ValidateToken(w http.ResponseWriter, r *http.Request) string {
 
 	db := db.NewDB()
 
-	hashes, err := db.LookupApiKeys()
+	hashes, err := db.LookupApiKeys("*")
 	if err != nil {
 		log.Println("Error while comparing Incoming API Request API Key with DB", err)
 		http.Error(w, "401 - Token Invalid", 401)

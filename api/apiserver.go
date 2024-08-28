@@ -21,13 +21,18 @@ type ApiHandler struct {
 	auth *auth.Auth
 }
 
-func (h *ApiHandler) GetTable(w http.ResponseWriter, r *http.Request) {
+func (a *ApiHandler) GetTable(w http.ResponseWriter, r *http.Request) {
 	// Check if Request is Authenticated
-	if !h.auth.ValidateSessionToken(w, r) {
+	if !a.auth.ValidateSessionToken(w, r) {
 		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 		return
 	}
-	keys, err := h.db.LookupApiKeyInfos()
+	claims, err := a.auth.GetClaims(r)
+	if err != nil {
+		// If Claims Extraction Failed, user will be Redirected to Update his Token.
+		a.Unauthenticated(w, r)
+	}
+	keys, err := a.db.LookupApiKeyInfos(claims.Sub)
 	if err != nil {
 		log.Fatal(err)
 	}
