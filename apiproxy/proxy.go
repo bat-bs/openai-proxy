@@ -66,7 +66,6 @@ func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	//Caching deactivated for testing
 	if fn, ok := backendProxy[backend]; ok {
 		fn.ServeHTTP(w, r)
 		return

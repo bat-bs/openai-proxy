@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -134,6 +133,5 @@ func (a *Auth) ValidateSessionToken(w http.ResponseWriter, r *http.Request) bool
 		return false
 		// handle error
 	}
-	fmt.Printf("Req: %s %s\n", r.URL.RequestURI(), r.URL.Path)
 	return true
 }

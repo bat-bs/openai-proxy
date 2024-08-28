@@ -25,7 +25,7 @@ func main() {
 	proxy.Init(mux)     // Start AI Proxy
 	go web.Init(mux, a) // Start Web UI
 
-	go api.ApiInit(mux) // Start Backend API
+	go api.ApiInit(mux, a) // Start Backend API
 
 	log.Printf("Serving on http://localhost:%d", 8082)
 	log.Fatal(http.ListenAndServe(":8082", mux))

@@ -13,11 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type EntryCreate struct {
-	db *db.Database
-}
-
-func generateToken(length int) string {
+func (a *ApiHandler) generateToken(length int) string {
 	randomBytes := make([]byte, 32)
 	_, err := rand.Read(randomBytes)
 	if err != nil {
@@ -25,7 +21,7 @@ func generateToken(length int) string {
 	}
 	return base32.StdEncoding.EncodeToString(randomBytes)[:length]
 }
-func hashToken(token string) string {
+func (a *ApiHandler) hashToken(token string) string {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(token), 5)
 	if err != nil {
 		log.Println("Error while hashing Secret: ", err)
@@ -33,18 +29,23 @@ func hashToken(token string) string {
 	return string(bytes)
 }
 
-func (e *EntryCreate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (a *ApiHandler) CreateEntry(w http.ResponseWriter, r *http.Request) {
+	// Check if Request is Authenticated
+	if !a.auth.ValidateSessionToken(w, r) {
+		a.Unauthenticated(w, r)
+		return
+	}
 	r.ParseForm()
 	uuid := uuid.NewString()
-	apikey := generateToken(32)
+	apikey := a.generateToken(32)
 	h := db.ApiKey{
 		UUID:        uuid,
-		ApiKey:      hashToken(apikey),
+		ApiKey:      a.hashToken(apikey),
 		Owner:       r.Form.Get("owner"),
 		AiApi:       r.Form.Get("apitype"),
 		Description: r.Form.Get("beschreibung"),
 	}
-	e.db.WriteEntry(&h)
+	a.db.WriteEntry(&h)
 
 	popupContent := `
 	<div class="w-full max-w-[16rem]">
@@ -72,11 +73,12 @@ func (e *EntryCreate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type EntryDelete struct {
-	db *db.Database
-}
-
-func (e *EntryDelete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (a *ApiHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
+	// Check if Request is Authenticated
+	if !a.auth.ValidateSessionToken(w, r) {
+		a.Unauthenticated(w, r)
+		return
+	}
 	key := strings.TrimPrefix(r.URL.Path, "/api2/table/entry/delete/")
-	e.db.DeleteEntry(&key)
+	a.db.DeleteEntry(&key)
 }
