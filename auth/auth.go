@@ -4,46 +4,57 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/joho/godotenv"
 	"golang.org/x/oauth2"
 )
 
-var oidcConf *oauth2.Config
-
-func Init(mux *http.ServeMux) {
-	err := godotenv.Load()
-	if err != nil {
-		log.Println(err)
+func Init(mux *http.ServeMux) (a *Auth) {
+	ctx := context.Background()
+	issuer, ok := os.LookupEnv("ISSUER")
+	if !ok {
+		log.Println("ISSUER env for OpenID not defined")
+		return
 	}
-	oidcConf = &oauth2.Config{
-		ClientID:     os.Getenv("OPENID_CLIENT_ID"),
-		ClientSecret: os.Getenv("OPENID_CLIENT_SECRET"),
-		RedirectURL:  os.Getenv("OPENID_REDIRECT_URL"),
+	provider, err := oidc.NewProvider(ctx, issuer)
+	if err != nil {
+		// handle error
+		log.Println("Cannot Initiate Provider: ", err)
+	}
 
+	clientId, ok := os.LookupEnv("CLIENT_ID")
+	clientSecret, ok := os.LookupEnv("CLIENT_SECRET")
+	if !ok {
+		log.Println("Some ENV required for OIDC not set")
+		return
+	}
+	// Configure an OpenID Connect aware OAuth2 client.
+	oauth2Config := &oauth2.Config{
+		ClientID:     clientId,
+		ClientSecret: clientSecret,
+		RedirectURL:  "http://localhost:8082/callback/",
+
+		// Discovery returns the OAuth2 endpoints.
+		Endpoint: provider.Endpoint(),
+
+		// "openid" is a required scope for OpenID Connect flows.
 		Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
 	}
 
-	log.Println("Running this config: ", oidcConf)
-	providerURL := os.Getenv("OPENID_PROVIDER_URL")
-	provider, err := oidc.NewProvider(context.Background(), providerURL)
-	oidcConf.Endpoint = provider.Endpoint()
-	if err != nil {
-		log.Fatal(err)
+	var verifier = provider.Verifier(&oidc.Config{ClientID: clientId})
+	a = &Auth{
+		oauth2Config: oauth2Config,
+		ctx:          context.Background(),
+		verifier:     verifier,
 	}
-
-	verifier := provider.Verifier(&oidc.Config{ClientID: oidcConf.ClientID})
-	callbackHandler := &baseHandle{
-		verifier: verifier,
-	}
-	mux.HandleFunc("/auth/openid/login", handleOAuth2Login)
-	mux.Handle("/auth/openid/callback", callbackHandler)
-
+	mux.HandleFunc("/callback/", a.CallbackHandler)
+	mux.HandleFunc("/login/", a.LoginHandler)
+	return a
 }
 
 type Claims struct {
@@ -52,79 +63,77 @@ type Claims struct {
 	Sub      string `json:"sub"`
 }
 
-type baseHandle struct {
-	verifier *oidc.IDTokenVerifier
-	Claims   *Claims
+type Auth struct {
+	oauth2Config *oauth2.Config
+	ctx          context.Context
+	verifier     *oidc.IDTokenVerifier
+	userClaims   *Claims
 }
 
-func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if ValidateJWTToken(h.Claims) {
-		http.RedirectHandler("/", 301)
-		return
-	}
-	h.handleOAuth2Callback(w, r)
-	ValidateJWTToken(h.Claims)
-}
-
-func Login() {
-
-}
-
-func handleOAuth2Login(w http.ResponseWriter, r *http.Request) {
+func (a *Auth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Create oauthState cookie
-	oauthState := generateStateOauthCookie(w)
-
-	/*
-		AuthCodeURL receive state that is a token to protect the user from CSRF attacks. You must always provide a non-empty string and
-		validate that it matches the the state query parameter on your redirect callback.
-	*/
-	u := oidcConf.AuthCodeURL(oauthState)
+	oauthState := a.generateStateOauthCookie(w)
+	u := a.oauth2Config.AuthCodeURL(oauthState)
 	http.Redirect(w, r, u, http.StatusTemporaryRedirect)
 }
 
-func generateStateOauthCookie(w http.ResponseWriter) string {
-	var expiration = time.Now().Add(20 * time.Minute)
-
+func (a *Auth) generateStateOauthCookie(w http.ResponseWriter) string {
+	var expiration = time.Now().Add(365 * 24 * time.Hour)
 	b := make([]byte, 16)
 	rand.Read(b)
 	state := base64.URLEncoding.EncodeToString(b)
-	cookie := http.Cookie{Name: "oauthstate", Value: state, Expires: expiration}
+	cookie := http.Cookie{Name: "oauthstate", Path: "/", Value: state, Expires: expiration}
 	http.SetCookie(w, &cookie)
 
 	return state
 }
 
-// TODO: Adapt to https://github.com/coreos/go-oidc/blob/v3/example/idtoken/app.go
-func (h *baseHandle) handleOAuth2Callback(w http.ResponseWriter, r *http.Request) {
-	state, err := r.Cookie("state")
-	if err != nil {
-		http.Error(w, "state not found", http.StatusBadRequest)
+func (a *Auth) CallbackHandler(w http.ResponseWriter, r *http.Request) {
+
+	oauthState, _ := r.Cookie("oauthstate")
+	if r.FormValue("state") != oauthState.Value {
+		log.Println("invalid oauth state")
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
-	ctx := context.Background()
 	// Verify state and errors.
-
-	oauth2Token, err := oidcConf.Exchange(ctx, r.URL.Query().Get("code"))
+	oauth2Token, err := a.oauth2Config.Exchange(a.ctx, r.URL.Query().Get("code"))
 	if err != nil {
 		// handle error
+		http.Error(w, "Token Exchange Failed", http.StatusBadRequest)
+		return
 	}
 
 	// Extract the ID Token from OAuth2 token.
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
 		// handle missing token
+		http.Error(w, "missing token in claim", http.StatusBadRequest)
+		return
 	}
-
+	http.SetCookie(w, &http.Cookie{Name: "session_token", Path: "/", Value: rawIDToken})
+	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+}
+func (a *Auth) ValidateSessionToken(w http.ResponseWriter, r *http.Request) bool {
 	// Parse and verify ID Token payload.
-	idToken, err := h.verifier.Verify(ctx, rawIDToken)
+	rawIDToken, err := r.Cookie("session_token")
+	if err != nil || rawIDToken == nil {
+		return false
+	}
+	idToken, err := a.verifier.Verify(a.ctx, rawIDToken.Value)
 	if err != nil {
-		// handle error
+		log.Println("Session Token Wrong")
+		http.Redirect(w, r, "/login/", http.StatusTemporaryRedirect)
+		return false
 	}
 
 	// Extract custom claims
-	if err := idToken.Claims(h.Claims); err != nil {
-		log.Printf("openid: cannot put id Token Claims into struct: ", err)
+	if err := idToken.Claims(&a.userClaims); err != nil {
+		log.Println("Claims Wrong", err)
+		return false
 		// handle error
 	}
+	fmt.Printf("Req: %s %s\n", r.URL.RequestURI(), r.URL.Path)
+	return true
 }
