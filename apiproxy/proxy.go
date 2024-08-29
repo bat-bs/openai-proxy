@@ -136,6 +136,10 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	r.Host = remoteUrl.Host
 	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
 
+	q := r.URL.Query()
+	q.Add("api-version", h.az.ApiVersion)
+	r.URL.RawQuery = q.Encode()
+
 	backendProxy[r.Host] = proxy
 
 	// Before proxying, log the intended complete URL.
