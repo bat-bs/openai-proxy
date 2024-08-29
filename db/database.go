@@ -127,7 +127,15 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 
 func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
-	rows, err := d.db.Query("SELECT ApiKey,Owner FROM apiKeys WHERE Owner=?", uid)
+
+	// Handle wildcard for ApiKey Comparison
+	var rows *sql.Rows
+	var err error
+	if uid == "*" {
+		rows, err = d.db.Query("SELECT ApiKey,Owner FROM apiKeys")
+	} else {
+		rows, err = d.db.Query("SELECT ApiKey,Owner FROM apiKeys WHERE Owner=?", uid)
+	}
 	if err != nil {
 		return nil, err
 	}
