@@ -5,6 +5,7 @@ import (
 	"net/http"
 	api "openai-api-proxy/api"
 	proxy "openai-api-proxy/apiproxy"
+	auth "openai-api-proxy/auth"
 	db "openai-api-proxy/db"
 	web "openai-api-proxy/webui"
 
@@ -19,10 +20,14 @@ func main() {
 	}
 	db.DatabaseInit()
 	mux := http.NewServeMux()
-	proxy.Init(mux)     // Start AI Proxy
-	go web.Init(mux)    // Start Web UI
-	go api.ApiInit(mux) // Start Backend API
+	a := auth.Init(mux)
 
+	proxy.Init(mux)     // Start AI Proxy
+	go web.Init(mux, a) // Start Web UI
+
+	go api.ApiInit(mux, a) // Start Backend API
+
+	log.Printf("Serving on http://localhost:%d", 8082)
 	log.Fatal(http.ListenAndServe(":8082", mux))
 
 }

@@ -3,40 +3,47 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>HTMX Table with TailwindCSS</title>
-<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.16/dist/tailwind.min.css" rel="stylesheet">
+<title>openai-proxy</title>
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.16/dist/tailwind.css" rel="stylesheet">
 
 <script src="https://unpkg.com/htmx.org"></script>
-
+<script src="https://unpkg.com/htmx-ext-path-deps@2.0.0/path-deps.js"></script>
+<script src="https://cdn.tailwindcss.com#.js"></script>
 <style>
 </style>
 
 </head>
-<body class="bg-gray-100 p-10">
-<h1 class="text-3xl font-bold mb-6">HTMX Table with TailwindCSS</h1>
+<body hx-ext='path-deps' class="bg-gray-100 dark:bg-slate-950  p-8">
+<div class="flex items-center pb-6">
+    <a target="_blank" href="https://blue-atlas.de">
+        <img src="img/blue_atlas_logo.png"  class="w-auto h-24">
+    </a>
+    <div class="h-20 border-x-2 ml-6"></div>
+    <p class="text-4xl dark:text-white font-bold pl-6">openai-api-proxy</p>
+</div>
+
 
 
 
 <!-- Container for the popup -->
-<div id="popup-container" class="hidden fixed inset-0 z-10 bg-gray-500 bg-opacity-75 flex items-center justify-center">
-    <div class="bg-white p-4 rounded-lg shadow-lg">
+<div id="popup-container" class="hidden fixed dark:text-white inset-0 z-10 bg-gray-500 bg-opacity-75 flex items-center justify-center">
+    <div class="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-lg">
         <!-- Content from the server response will be inserted here -->
         <div id="popup-content"></div>
 
         <!-- Close button -->
-        <button id="close-popup" class="mt-2 bg-red-500 text-white px-3 py-1 rounded hover:bg-red-700">Close</button>
+        <button id="close-popup" hx-get="/api2/table/get" hx-target="#table-container" class="mt-2 bg-red-500 text-white px-3 py-1 rounded hover:bg-red-700">Close</button>
     </div>
 </div>
 
 
 <!-- HTMX endpoint call for table data -->
-<div hx-get="/api2/table/get" class="form-control" hx-swap="innerHTML" hx-trigger="load, submit from:table-container" hx-target="#table-container">
+<div id="table-container" class="z-5" hx-get="/api2/table/get" path-deps="/api2/*"  hx-swap="innerHTML" hx-trigger="load, rld">
     <p>Loading...</p>
 </div>
 
 <!-- Table container for HTMX response -->
-<div id="table-container">
-    <button type="submit" id="save"></button>
+<div >
 </div>
 
 <script>

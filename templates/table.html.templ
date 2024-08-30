@@ -1,36 +1,43 @@
 
-<table class="min-w-full divide-y divide-gray-200 shadow overflow-hidden rounded-lg">
-        <thead class="bg-gray-50">
+<table class="min-w-full divide-y dark:text-gray-200 divide-gray-200 shadow overflow-hidden rounded-lg">
+        <thead class="bg-gray-50 dark:bg-slate-800 dark:text-white text-gray-500">
             <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    ApiKey
+                <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                    APIKEY ID
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Owner
-                </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <!-- <th class="px-6 py-3 text-left text-xs font-medium  uppercase tracking-wider">
                     Schnittstelle
-                </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                </th> -->
+                <th class="px-6 py-3   text-left text-xs font-medium uppercase tracking-wider">
                     Beschreibung
                 </th>
+                <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider"></th>
             </tr>
         </thead>
-        <tbody id="table-body" class="bg-white divide-y divide-gray-200">
+        <tbody id="table-body" class="bg-white dark:bg-slate-900 divide-y divide-gray-200">
             <!-- Daten-Rows, generiert durch Ihren Server -->
             <tr>
                 <td class="px-6 py-4 whitespace-nowrap">
                 </td>
     
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <input type="text" class="bg-gray-100 border border-gray-300 text-gray-800 text-sm rounded-lg p-1.5 focus:ring-blue-400 focus:border-blue-300 block  dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-200 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-300" id="ownerin" name="owner" required>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <select class="z-10 bg-white divide-y bg-gray-100 focus:ring-blue-400 divide-gray-100 rounded-lg shadow p-1.5 dark:bg-gray-600" id="apitypein" name="apitype">
-                      <option value="azure">Azure</option>
-                      <option value="openai">OpenAI</option>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <input type="text" id="beschreibungin"  class="bg-gray-100 w-full border border-gray-300 text-gray-800 text-sm p-1.5 rounded-lg focus:ring-blue-400 focus:border-blue-300 block  dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-200 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-300" name="beschreibung" />
+                <!-- <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="group-hover:opacity-100 transition-opacity bg-gray-200 dark:bg-slate-900 px-1 text-sm dark:text-white text-gray-100 rounded-md absolute left-1/2 
+    -translate-x-1/2 translate-y-full opacity-0 m-4 mx-auto">Currently not Implemented</span>
+                    <select disabled class="z-10  divide-y bg-gray-200 focus:ring-blue-400 divide-gray-100 rounded-lg shadow p-1.5 dark:bg-gray-600" id="apitypein" name="apitype">
+                    <option value="azure">Azure</option>
+                    <option value="openai">OpenAI</option> -->
+                <td class="px-6 py-4 whitespace-nowrap"> 
+                    <input
+                        type="text"
+                        id="beschreibungin" 
+                        class="bg-gray-100 w-full border border-gray-300 dark:text-white text-gray-800 text-sm p-1.5 rounded-lg focus:ring-blue-400 focus:border-blue-300 block  dark:bg-slate-900 dark:border-gray-400 dark:placeholder-gray-200 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-300"
+                        name="beschreibung"
+                        hx-include="[id='beschreibungin']"
+                        hx-swap="innerHTML"
+                        hx-target="#popup-content"
+                        hx-post="/api2/table/entry/save"
+                        hx-trigger="keyup[key=='Enter']"
+                        />
                 </td>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -41,9 +48,9 @@
                             hx-post="/api2/table/entry/save"
                             hx-target="#popup-content"
                             hx-swap="innerHTML"
-                            hx-include="[id='apikeyin'], [id='ownerin'], [id='apitypein'], [id='beschreibungin']"
-                            class="text-indigo-600 hover:text-indigo-900">
-                            Save
+                            hx-include="[id='beschreibungin']"
+                            class="text-indigo-600 dark:text-indigo-500 dark:hover:text-indigo-600 hover:text-indigo-900">
+                            Create New
                     </button>
 
                 </td>
@@ -55,12 +62,9 @@
             <td name="keyid" class="px-6 py-4 whitespace-nowrap">
                 {{ .UUID }}
             </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-                {{ .Owner }}
-            </td>
-            <td class="px-6 py-4 whitespace-nowrap">
+            <!-- <td class="px-6 py-4 whitespace-nowrap">
                 {{ .AiApi }}
-            </td>
+            </td> -->
             <td class="px-6 py-4 whitespace-nowrap">
                 {{ .Description }}
             </td>
