@@ -16,7 +16,7 @@ func main() {
 	log.Println("openai-proxy started")
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("Error loading Env File", err)
+		log.Println("Warning: not able to loading Env File", err)
 	}
 	db.DatabaseInit()
 	mux := http.NewServeMux()
