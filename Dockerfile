@@ -36,6 +36,14 @@ RUN go build -o server -v  cmd/main.go
 ## Runtime Stage
 FROM alpine:latest
 
+# Atlas DB Migrations
+RUN apk update && apk add bash && apk add curl
+RUN curl -sSf -o /tmp/atlas_install.sh https://atlasgo.sh
+RUN chmod +x /tmp/atlas_install.sh
+RUN /tmp/atlas_install.sh
+
+
+
 RUN mkdir -p /app/db/migrations
 COPY --from=builder /app/server /app/server
 COPY db/schema.sql /app/db/schema.sql
