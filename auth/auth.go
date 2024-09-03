@@ -27,16 +27,24 @@ func Init(mux *http.ServeMux) (a *Auth) {
 	}
 
 	clientId, ok := os.LookupEnv("CLIENT_ID")
+	if !ok {
+		log.Println("CLIENT_ID, required for OIDC not set")
+		return
+	}
 	clientSecret, ok := os.LookupEnv("CLIENT_SECRET")
 	if !ok {
-		log.Println("Some ENV required for OIDC not set")
+		log.Println("CLIENT_SECRET, required for OIDC not set")
 		return
+	}
+	redirect, ok := os.LookupEnv("OAUTH_REDIRECT_DOMAIN")
+	if !ok {
+		redirect = "http://localhost:8082"
 	}
 	// Configure an OpenID Connect aware OAuth2 client.
 	oauth2Config := &oauth2.Config{
 		ClientID:     clientId,
 		ClientSecret: clientSecret,
-		RedirectURL:  "http://localhost:8082/callback/",
+		RedirectURL:  redirect + "/callback/",
 
 		// Discovery returns the OAuth2 endpoints.
 		Endpoint: provider.Endpoint(),
