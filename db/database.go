@@ -76,7 +76,7 @@ func (d *Database) Migrate() {
 	var atlasurl string
 
 	var re = regexp.MustCompile(`(postgresql://)(.*)`)
-	atlasurl = re.ReplaceAllString(databasePath, `postgres://$2?search_path=public&sslmode=disable`)
+	atlasurl = re.ReplaceAllString(databasePath, `postgres://$2?search_path=public`)
 
 	// Run `atlas migrate apply` on a PSQL database
 	res, err := client.MigrateApply(context.Background(), &atlasexec.MigrateApplyParams{
