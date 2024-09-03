@@ -93,9 +93,28 @@ func (d *Database) LookupDatabasePath() string {
 	var ok bool
 
 	if path, ok = os.LookupEnv("DATABASE_PATH"); !ok {
-		log.Fatal("DATABASE_PATH cannot be empty. use the following format: postgresql://user:password@server:port/dbname")
-		return ""
+		username, ok := os.LookupEnv("DATABASE_USERNAME")
+		if !ok {
+			log.Println("DATABASE_USERNAME unset")
+		}
+		password, ok := os.LookupEnv("DATABASE_PASSWORD")
+		if !ok {
+			log.Println("DATABASE_PASSWORD unset")
+		}
+		host, ok := os.LookupEnv("DATABASE_HOST")
+		if !ok {
+			log.Println("DATABASE_HOST unset")
+		}
+		dbname, ok := os.LookupEnv("DATABASE_NAME")
+		if !ok {
+			log.Println("DATABASE_NAME unset")
+		}
+
+		path = fmt.Sprintf("postgresql://%s:%s@%s/%s", username, password, host, dbname)
+
+		return path
 	} else {
+
 		return path
 	}
 }
