@@ -45,9 +45,14 @@ RUN /tmp/atlas_install.sh
 
 
 RUN mkdir -p /app/db/migrations
-COPY --from=builder /app/server /app/server
-COPY db/schema.sql /app/db/schema.sql
-COPY db/migrations/* /app/db/migrations
-RUN chmod +x /app/server
+
 WORKDIR /app
+
+COPY --from=builder /app/server /app/server
+COPY db/schema.sql db/schema.sql
+COPY db/migrations/*db/migrations
+COPY public public
+COPY templates templates
+RUN chmod +x server
+
 CMD ["/app/server"]
