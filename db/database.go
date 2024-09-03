@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 
 	"ariga.io/atlas-go-sdk/atlasexec"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type Database struct {
@@ -16,11 +17,11 @@ type Database struct {
 }
 
 type ApiKey struct {
-	UUID        string
-	ApiKey      string
-	Owner       string
+	UUID        string // ID that will be displayed in UI
+	ApiKey      string // Backend, not implemented yet
+	Owner       string // sub from oidc claims
 	AiApi       string // can be openai or azure
-	Description string //optional
+	Description string // optional, user can describe his key
 }
 
 func DatabaseInit() {
@@ -30,10 +31,10 @@ func DatabaseInit() {
 	}
 
 	d := NewDB()
+	d.Migrate()
 	if _, err := d.db.Exec(string(createTable)); err != nil {
 		log.Fatal(err)
 	}
-	d.Migrate()
 
 }
 
@@ -44,7 +45,7 @@ func NewDB() *Database {
 
 	databasePath = d.LookupDatabasePath()
 	var err error
-	d.db, err = sql.Open("sqlite3", databasePath)
+	d.db, err = sql.Open("pgx", databasePath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -71,9 +72,15 @@ func (d *Database) Migrate() {
 	if err != nil {
 		log.Fatalf("failed to initialize client: %v", err)
 	}
-	// Run `atlas migrate apply` on a SQLite database under /tmp.
+
+	var atlasurl string
+
+	var re = regexp.MustCompile(`(postgresql://)(.*)`)
+	atlasurl = re.ReplaceAllString(databasePath, `postgres://$2?search_path=public&sslmode=disable`)
+
+	// Run `atlas migrate apply` on a PSQL database
 	res, err := client.MigrateApply(context.Background(), &atlasexec.MigrateApplyParams{
-		URL: "sqlite://" + databasePath,
+		URL: atlasurl,
 	})
 	if err != nil {
 		log.Fatalf("failed to apply migrations: %v", err)
@@ -86,13 +93,15 @@ func (d *Database) LookupDatabasePath() string {
 	var ok bool
 
 	if path, ok = os.LookupEnv("DATABASE_PATH"); !ok {
-		return "apiproxy.sqlite"
+		log.Fatal("DATABASE_PATH cannot be empty. use the following format: postgresql://user:password@server:port/dbname")
+		return ""
+	} else {
+		return path
 	}
-	return path
 }
 
 func (d *Database) WriteEntry(a *ApiKey) {
-	_, err := d.db.Exec("INSERT INTO apiKeys VALUES (?, ?, ?, ?, ?)", a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description)
+	_, err := d.db.Exec("INSERT INTO apiKeys VALUES ($1, $2, $3, $4, $5)", a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description)
 	if err != nil {
 		log.Printf("Insert Failed: %v", err)
 		return
@@ -100,7 +109,7 @@ func (d *Database) WriteEntry(a *ApiKey) {
 }
 func (d *Database) DeleteEntry(key *string, uid string) {
 	log.Println("Deleting Key ", *key)
-	_, err := d.db.Exec("DELETE FROM apiKeys WHERE UUID=? AND Owner=?", *key, uid)
+	_, err := d.db.Exec("DELETE FROM apiKeys WHERE UUID=$1 AND Owner=$2", *key, uid)
 	if err != nil {
 		log.Printf("Delete Failed: %v", err)
 		return
@@ -110,7 +119,7 @@ func (d *Database) DeleteEntry(key *string, uid string) {
 
 func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
-	rows, err := d.db.Query("SELECT UUID,Owner,AiApi,Description FROM apiKeys WHERE Owner=?", uid)
+	rows, err := d.db.Query("SELECT UUID,Owner,AiApi,Description FROM apiKeys WHERE Owner=$1", uid)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +143,7 @@ func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 	if uid == "*" {
 		rows, err = d.db.Query("SELECT ApiKey,Owner FROM apiKeys")
 	} else {
-		rows, err = d.db.Query("SELECT ApiKey,Owner FROM apiKeys WHERE Owner=?", uid)
+		rows, err = d.db.Query("SELECT ApiKey,Owner FROM apiKeys WHERE Owner=$1", uid)
 	}
 	if err != nil {
 		return nil, err
