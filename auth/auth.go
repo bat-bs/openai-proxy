@@ -65,9 +65,10 @@ func Init(mux *http.ServeMux) (a *Auth) {
 }
 
 type Claims struct {
-	Email    string `json:"email"`
-	Verified bool   `json:"email_verified"`
-	Sub      string `json:"sub"`
+	Email    string   `json:"email"`
+	Verified bool     `json:"email_verified"`
+	Sub      string   `json:"sub"`
+	Groups   []string `json:"groups"`
 }
 
 type Auth struct {
