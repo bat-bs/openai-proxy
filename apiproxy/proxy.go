@@ -147,8 +147,12 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	actualURL.Path = r.URL.Path
 	actualURL.RawQuery = r.URL.RawQuery
 	log.Printf("Proxying request to Azure backend: %s", actualURL.String())
-
 	r.Body.Close()
+
+	log.Println("Hier 1")
+	proxy.ModifyResponse = NewResponse
+	log.Println("Hier 2")
+
 	proxy.ServeHTTP(w, r)
 
 }
