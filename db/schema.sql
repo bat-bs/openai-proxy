@@ -19,10 +19,11 @@ CREATE TABLE IF NOT EXISTS apiKeys (
 );
 
 CREATE TABLE IF NOT EXISTS requests (
-    id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    apikey VARCHAR(255) NOT NULL REFERENCES apiKeys(UUID),
+    id VARCHAR(255) NOT NULL PRIMARY KEY,
+    api_key_id VARCHAR(255) NOT NULL REFERENCES apiKeys(UUID),
     request_time timestamp with time zone DEFAULT now(),
-    token_count integer NOT NULL,
+    token_count_prompt integer NOT NULL,
+    token_count_complete integer NOT NULL,
     model VARCHAR(255)
 );
 

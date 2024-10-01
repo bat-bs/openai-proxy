@@ -149,25 +149,23 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	log.Printf("Proxying request to Azure backend: %s", actualURL.String())
 	r.Body.Close()
 
-	log.Println("Hier 1")
 	proxy.ModifyResponse = NewResponse
-	log.Println("Hier 2")
 
 	proxy.ServeHTTP(w, r)
 
 }
 
 // Used When Debugging is Active
-type DebugTransport struct{}
+// type DebugTransport struct{}
 
-func (DebugTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	b, err := httputil.DumpRequestOut(r, false)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(string(b))
-	return http.DefaultTransport.RoundTrip(r)
-}
+// func (DebugTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+// 	b, err := httputil.DumpRequestOut(r, false)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	fmt.Println(string(b))
+// 	return http.DefaultTransport.RoundTrip(r)
+// }
 
 // used for translating openai requests to Azure API
 type OpenAIBody struct {
@@ -175,7 +173,7 @@ type OpenAIBody struct {
 }
 
 func (h *baseHandle) SetAzureUrl(r *http.Request) *url.URL {
-	r.Header.Del(authHeader)
+	//r.Header.Del(authHeader)
 
 	//Extract Model -> Azure Deployment -- Why Copy? https://stackoverflow.com/questions/62017146/http-request-clone-is-not-deep-clone
 

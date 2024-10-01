@@ -165,6 +165,19 @@ func (d *Database) DeleteEntry(key *string, uid string) {
 
 }
 
+type Request struct {
+	ID                 string
+	ApiKeyID           string
+	TokenCountPrompt   int // Tokens of the Request (string) by the user
+	TokenCountComplete int // Tokens of the Response from the API
+	Model              string
+}
+
+func (d *Database) WriteRequest(r *Request) error {
+	_, err := d.db.Exec("INSERT INTO requests (id,api_key_id,token_count_prompt,token_count_complete,model) VALUES ($1,$2,$3,$4,$5)", r.ID, r.ApiKeyID, r.TokenCountPrompt, r.TokenCountComplete, r.Model)
+	return err
+}
+
 func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
 	rows, err := d.db.Query("SELECT UUID,Owner,AiApi,Description FROM apiKeys WHERE Owner=$1", uid)
@@ -189,9 +202,9 @@ func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 	var rows *sql.Rows
 	var err error
 	if uid == "*" {
-		rows, err = d.db.Query("SELECT ApiKey,Owner FROM apiKeys")
+		rows, err = d.db.Query("SELECT UUID,ApiKey,Owner FROM apiKeys")
 	} else {
-		rows, err = d.db.Query("SELECT ApiKey,Owner FROM apiKeys WHERE Owner=$1", uid)
+		rows, err = d.db.Query("SELECT UUID,ApiKey,Owner FROM apiKeys WHERE Owner=$1", uid)
 	}
 	if err != nil {
 		return nil, err
@@ -199,7 +212,7 @@ func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 
 	for rows.Next() {
 		var a ApiKey
-		if err := rows.Scan(&a.ApiKey, &a.Owner); err != nil {
+		if err := rows.Scan(&a.UUID, &a.ApiKey, &a.Owner); err != nil {
 			return apikeys, err
 		}
 		apikeys = append(apikeys, a)

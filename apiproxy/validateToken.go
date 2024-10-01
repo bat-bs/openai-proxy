@@ -11,18 +11,18 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func CompareToken(hashes []db.ApiKey, apiKey string) error {
+func CompareToken(hashes []db.ApiKey, apiKey string) (string, error) {
 
 	for _, hash := range hashes {
 		err := bcrypt.CompareHashAndPassword([]byte(hash.ApiKey), []byte(apiKey))
-		log.Printf("Compared %s with %s", apiKey, hash.ApiKey)
+		// log.Printf("Compared %s with %s", apiKey, hash.ApiKey)
 		if err == nil {
-			return nil
+			return hash.UUID, nil
 		}
 	}
 	err := fmt.Errorf("received invalid bearer token")
 
-	return err
+	return "", err
 }
 
 func ValidateToken(w http.ResponseWriter, r *http.Request) string {
@@ -31,7 +31,7 @@ func ValidateToken(w http.ResponseWriter, r *http.Request) string {
 	apiKey := strings.TrimPrefix(header, "Bearer ")
 	//fmt.Println("\"", apiKey, "\"")
 	if apiKey == "Bearer " {
-		http.Error(w, "401 - Token Empty", 401)
+		http.Error(w, "401 - Token Empty", http.StatusUnauthorized)
 		return ""
 	}
 
@@ -40,12 +40,12 @@ func ValidateToken(w http.ResponseWriter, r *http.Request) string {
 	hashes, err := db.LookupApiKeys("*")
 	if err != nil || len(hashes) == 0 {
 		log.Println("Error while requesting API Keys from DB", err)
-		http.Error(w, "401 - Token Invalid", 401)
+		http.Error(w, "401 - Token Invalid", http.StatusUnauthorized)
 		return ""
 	}
 
-	if err := CompareToken(hashes, apiKey); err != nil {
-		http.Error(w, "401 - Token Invalid", 401)
+	if _, err := CompareToken(hashes, apiKey); err != nil {
+		http.Error(w, "401 - Token Invalid", http.StatusUnauthorized)
 		return ""
 	}
 	azureApiKey := os.Getenv("AZURE_API_KEY")
