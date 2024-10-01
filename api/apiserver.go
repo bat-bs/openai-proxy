@@ -6,6 +6,8 @@ import (
 	"net/http"
 	auth "openai-api-proxy/auth"
 	db "openai-api-proxy/db"
+
+	"github.com/Masterminds/sprig/v3"
 )
 
 func ApiInit(mux *http.ServeMux, a *auth.Auth) {
@@ -36,7 +38,8 @@ func (a *ApiHandler) GetTable(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	templ, err := template.New("table.html.templ").ParseFiles("templates/table.html.templ")
+	templ := template.Must(template.New("table.html.templ").Funcs(sprig.FuncMap()).ParseFiles("templates/table.html.templ"))
+
 	if err != nil {
 		panic(err)
 	}

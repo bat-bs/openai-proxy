@@ -11,6 +11,9 @@
                 <th class="px-6 py-3   text-left text-xs font-medium uppercase tracking-wider">
                     Beschreibung
                 </th>
+                <th class="px-6 py-3   text-left text-xs font-medium uppercase tracking-wider">
+                    Genutzte Tokens
+                </th>
                 <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider"></th>
             </tr>
         </thead>
@@ -39,7 +42,7 @@
                         hx-trigger="keyup[key=='Enter']"
                         />
                 </td>
-                </td>
+                <td />
                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
 
                     <button name="save"
@@ -56,7 +59,7 @@
                 </td>
             </tr>
         {{ $length := len . }}
-        {{ if gt $length 0}}
+        {{ if gt $length 0 }}
         {{ range . }}
         <tr>
             <td name="keyid" class="px-6 py-4 whitespace-nowrap">
@@ -68,6 +71,10 @@
             <td class="px-6 py-4 whitespace-nowrap">
                 {{ .Description }}
             </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+                {{ if .TokenCountPrompt }}{{ add .TokenCountPrompt .TokenCountComplete }}{{ else }}0{{ end }}
+            </td>
+
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <button name="delete"
                                             id="delete"

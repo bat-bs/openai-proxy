@@ -17,12 +17,14 @@ type Database struct {
 }
 
 type ApiKey struct {
-	UUID        string   // ID that will be displayed in UI
-	ApiKey      string   // Backend, not implemented yet
-	Owner       string   // sub from oidc claims
-	Groups      []string // groups from oidc claims
-	AiApi       string   // can be openai or azure
-	Description string   // optional, user can describe his key
+	UUID               string   // ID that will be displayed in UI
+	ApiKey             string   // Backend, not implemented yet
+	Owner              string   // sub from oidc claims
+	Groups             []string // groups from oidc claims
+	AiApi              string   // can be openai or azure
+	Description        string   // optional, user can describe his key
+	TokenCountPrompt   *int
+	TokenCountComplete *int
 }
 
 func DatabaseInit() {
@@ -180,14 +182,14 @@ func (d *Database) WriteRequest(r *Request) error {
 
 func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
-	rows, err := d.db.Query("SELECT UUID,Owner,AiApi,Description FROM apiKeys WHERE Owner=$1", uid)
+	rows, err := d.db.Query("SELECT a.UUID,a.Owner,a.AiApi,a.Description,SUM(r.token_count_prompt),SUM(r.token_count_complete) FROM apiKeys a LEFT JOIN requests r ON a.UUID = r.api_key_id WHERE Owner=$1 GROUP BY a.UUID", uid)
 	if err != nil {
 		return nil, err
 	}
 
 	for rows.Next() {
 		var a ApiKey
-		if err := rows.Scan(&a.UUID, &a.Owner, &a.AiApi, &a.Description); err != nil {
+		if err := rows.Scan(&a.UUID, &a.Owner, &a.AiApi, &a.Description, &a.TokenCountPrompt, &a.TokenCountComplete); err != nil {
 			return apikeys, err
 		}
 		apikeys = append(apikeys, a)
