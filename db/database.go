@@ -17,11 +17,14 @@ type Database struct {
 }
 
 type ApiKey struct {
-	UUID        string // ID that will be displayed in UI
-	ApiKey      string // Backend, not implemented yet
-	Owner       string // sub from oidc claims
-	AiApi       string // can be openai or azure
-	Description string // optional, user can describe his key
+	UUID               string   // ID that will be displayed in UI
+	ApiKey             string   // Backend, not implemented yet
+	Owner              string   // sub from oidc claims
+	Groups             []string // groups from oidc claims
+	AiApi              string   // can be openai or azure
+	Description        string   // optional, user can describe his key
+	TokenCountPrompt   *int
+	TokenCountComplete *int
 }
 
 func DatabaseInit() {
@@ -75,8 +78,8 @@ func (d *Database) Migrate() {
 
 	var atlasurl string
 
-	var re = regexp.MustCompile(`(postgresql://)(.*)`)
-	atlasurl = re.ReplaceAllString(databasePath, `postgres://$2?search_path=public`)
+	var re = regexp.MustCompile(`(postgresql://)([^?]*)(?:\?(.*))?`)
+	atlasurl = re.ReplaceAllString(databasePath, `postgres://$2?search_path=public&$3`)
 
 	// Run `atlas migrate apply` on a PSQL database
 	res, err := client.MigrateApply(context.Background(), &atlasexec.MigrateApplyParams{
@@ -87,6 +90,10 @@ func (d *Database) Migrate() {
 	}
 	fmt.Printf("Applied %d migrations\n", len(res.Applied))
 }
+
+// func (d *Database) CheckAndCreateUser(sub string) string {
+
+// }
 
 func (d *Database) LookupDatabasePath() string {
 	var path string
@@ -119,12 +126,36 @@ func (d *Database) LookupDatabasePath() string {
 	}
 }
 
-func (d *Database) WriteEntry(a *ApiKey) {
+func (d *Database) CheckUser(a *ApiKey) (err error) {
+	var id string
+	err1 := d.db.QueryRow("SELECT id from users where id = $1", a.Owner).Scan(&id)
+	if err1 == sql.ErrNoRows {
+		log.Println("User not found, creating in DB: ", err1)
+		_, err := d.db.Exec("INSERT INTO users (id) VALUES ($1)", a.Owner)
+		if err != nil {
+			log.Printf("User Insert Failed: %v", err)
+			return err
+		}
+	} else if err1 != nil {
+		log.Println("Error reading User in DB: ", err1)
+		return err1
+	}
+	return nil
+}
+
+func (d *Database) WriteEntry(a *ApiKey) error {
+
+	if err := d.CheckUser(a); err != nil {
+		return err
+	}
+
 	_, err := d.db.Exec("INSERT INTO apiKeys VALUES ($1, $2, $3, $4, $5)", a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description)
 	if err != nil {
-		log.Printf("Insert Failed: %v", err)
-		return
+		log.Printf("Api-Key Insert Failed: %v", err)
+		return err
 	}
+
+	return nil
 }
 func (d *Database) DeleteEntry(key *string, uid string) {
 	log.Println("Deleting Key ", *key)
@@ -136,16 +167,29 @@ func (d *Database) DeleteEntry(key *string, uid string) {
 
 }
 
+type Request struct {
+	ID                 string
+	ApiKeyID           string
+	TokenCountPrompt   int // Tokens of the Request (string) by the user
+	TokenCountComplete int // Tokens of the Response from the API
+	Model              string
+}
+
+func (d *Database) WriteRequest(r *Request) error {
+	_, err := d.db.Exec("INSERT INTO requests (id,api_key_id,token_count_prompt,token_count_complete,model) VALUES ($1,$2,$3,$4,$5)", r.ID, r.ApiKeyID, r.TokenCountPrompt, r.TokenCountComplete, r.Model)
+	return err
+}
+
 func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
-	rows, err := d.db.Query("SELECT UUID,Owner,AiApi,Description FROM apiKeys WHERE Owner=$1", uid)
+	rows, err := d.db.Query("SELECT a.UUID,a.Owner,a.AiApi,a.Description,SUM(r.token_count_prompt),SUM(r.token_count_complete) FROM apiKeys a LEFT JOIN requests r ON a.UUID = r.api_key_id WHERE Owner=$1 GROUP BY a.UUID", uid)
 	if err != nil {
 		return nil, err
 	}
 
 	for rows.Next() {
 		var a ApiKey
-		if err := rows.Scan(&a.UUID, &a.Owner, &a.AiApi, &a.Description); err != nil {
+		if err := rows.Scan(&a.UUID, &a.Owner, &a.AiApi, &a.Description, &a.TokenCountPrompt, &a.TokenCountComplete); err != nil {
 			return apikeys, err
 		}
 		apikeys = append(apikeys, a)
@@ -160,9 +204,9 @@ func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 	var rows *sql.Rows
 	var err error
 	if uid == "*" {
-		rows, err = d.db.Query("SELECT ApiKey,Owner FROM apiKeys")
+		rows, err = d.db.Query("SELECT UUID,ApiKey,Owner FROM apiKeys")
 	} else {
-		rows, err = d.db.Query("SELECT ApiKey,Owner FROM apiKeys WHERE Owner=$1", uid)
+		rows, err = d.db.Query("SELECT UUID,ApiKey,Owner FROM apiKeys WHERE Owner=$1", uid)
 	}
 	if err != nil {
 		return nil, err
@@ -170,7 +214,7 @@ func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 
 	for rows.Next() {
 		var a ApiKey
-		if err := rows.Scan(&a.ApiKey, &a.Owner); err != nil {
+		if err := rows.Scan(&a.UUID, &a.ApiKey, &a.Owner); err != nil {
 			return apikeys, err
 		}
 		apikeys = append(apikeys, a)
