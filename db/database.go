@@ -31,6 +31,7 @@ func DatabaseInit() {
 	}
 
 	d := NewDB()
+	defer d.Close()
 	d.Migrate()
 	if _, err := d.db.Exec(string(createTable)); err != nil {
 		log.Fatal(err)
@@ -56,6 +57,10 @@ func NewDB() *Database {
 // func (d *Database) CheckAndCreateUser(sub string) string {
 
 // }
+
+func (d *Database) Close() {
+	d.db.Close()
+}
 
 func (d *Database) LookupDatabasePath() string {
 	var path string
@@ -88,12 +93,19 @@ func (d *Database) LookupDatabasePath() string {
 	}
 }
 
-func (d *Database) CheckUser(a *ApiKey) (err error) {
-	var id string
-	err1 := d.db.QueryRow("SELECT id from users where id = $1", a.Owner).Scan(&id)
+type User struct {
+	Name string
+	Sub  string
+}
+
+func (d *Database) CheckUser(u *User) (err error) {
+	var sub string
+	var name sql.NullString
+
+	err1 := d.db.QueryRow("SELECT id,name FROM users WHERE id = $1", u.Sub).Scan(&sub, &name)
 	if err1 == sql.ErrNoRows {
-		log.Println("User not found, creating in DB: ", err1)
-		_, err := d.db.Exec("INSERT INTO users (id) VALUES ($1)", a.Owner)
+
+		_, err := d.db.Exec("INSERT INTO users id,name VALUES ($1, $2)", u.Sub, u.Name)
 		if err != nil {
 			log.Printf("User Insert Failed: %v", err)
 			return err
@@ -101,24 +113,24 @@ func (d *Database) CheckUser(a *ApiKey) (err error) {
 	} else if err1 != nil {
 		log.Println("Error reading User in DB: ", err1)
 		return err1
+	} else if u.Name != name.String {
+		_, err := d.db.Exec("UPDATE users SET name=$1 WHERE id=$2", u.Sub, u.Name)
+		if err != nil {
+			log.Printf("User updating Failed: %v", err)
+		}
 	}
 	return nil
 }
 
 func (d *Database) WriteEntry(a *ApiKey) error {
-
-	if err := d.CheckUser(a); err != nil {
-		return err
-	}
-
 	_, err := d.db.Exec("INSERT INTO apiKeys VALUES ($1, $2, $3, $4, $5)", a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description)
 	if err != nil {
 		log.Printf("Api-Key Insert Failed: %v", err)
 		return err
 	}
-
 	return nil
 }
+
 func (d *Database) DeleteEntry(key *string, uid string) {
 	log.Println("Deleting Key ", *key)
 	_, err := d.db.Exec("DELETE FROM apiKeys WHERE UUID=$1 AND Owner=$2", *key, uid)

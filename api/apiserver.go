@@ -34,6 +34,15 @@ func (a *ApiHandler) GetTable(w http.ResponseWriter, r *http.Request) {
 		// If Claims Extraction Failed, user will be Redirected to Update his Token.
 		a.Unauthenticated(w, r)
 	}
+
+	// Check/Create user as its the first authenticated action ran
+	u := db.User{
+		Name: claims.Name,
+		Sub:  claims.Sub,
+	}
+	log.Println(u.Name)
+	a.db.CheckUser(&u)
+
 	keys, err := a.db.LookupApiKeyInfos(claims.Sub)
 	if err != nil {
 		log.Fatal(err)

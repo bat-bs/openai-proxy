@@ -66,6 +66,7 @@ func Init(mux *http.ServeMux) (a *Auth) {
 
 type Claims struct {
 	Email    string   `json:"email"`
+	Name     string   `json:"name"`
 	Verified bool     `json:"email_verified"`
 	Sub      string   `json:"sub"`
 	Groups   []string `json:"groups"`
@@ -127,7 +128,13 @@ func (a *Auth) GetClaims(r *http.Request) (*Claims, error) {
 	var err error
 	// Parse and verify ID Token payload.
 	rawIDToken, err := r.Cookie("session_token")
+	if err != nil {
+		return nil, err
+	}
 	idToken, err := a.verifier.Verify(a.ctx, rawIDToken.Value)
+	if err != nil {
+		return nil, err
+	}
 	claims := &Claims{}
 	// Extract custom claims
 	if err = idToken.Claims(claims); err != nil {
