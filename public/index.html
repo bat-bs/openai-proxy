@@ -13,13 +13,16 @@
 </style>
 
 </head>
-<body hx-ext='path-deps' class="bg-gray-100 dark:bg-slate-950  p-8">
+<body hx-ext='path-deps' class="dark:text-white bg-gray-100 dark:bg-slate-950  p-8">
+<div class="flex max-w justify-between">
 <div class="flex items-center pb-6">
     <a target="_blank" href="https://blue-atlas.de">
         <img src="img/blue_atlas_logo.png"  class="w-auto h-24">
     </a>
     <div class="h-20 border-x-2 ml-6"></div>
-    <p class="text-4xl dark:text-white font-bold pl-6">openai-api-proxy</p>
+    <p class="text-4xl font-bold pl-6">openai-api-proxy</p>
+</div>
+<div id="user-widget" hx-get="/api2/user/widget" hx-swap="innerHTML" class="mt-8 mr-4" hx-trigger="load"></div>
 </div>
 
 

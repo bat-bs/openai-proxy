@@ -12,6 +12,8 @@ import (
 
 func ApiInit(mux *http.ServeMux, a *auth.Auth) {
 	api := ApiHandler{db.NewDB(), a}
+	mux.HandleFunc("/api2/user/widget", api.GetUserWidget)
+	mux.HandleFunc("/api2/user/logout", api.LogoutUser)
 	mux.HandleFunc("/api2/table/get", api.GetTable)
 	mux.HandleFunc("/api2/table/entry/save", api.CreateEntry)
 	mux.HandleFunc("/api2/table/entry/delete/", api.DeleteEntry)
@@ -21,6 +23,34 @@ func ApiInit(mux *http.ServeMux, a *auth.Auth) {
 type ApiHandler struct {
 	db   *db.Database
 	auth *auth.Auth
+}
+
+func (a *ApiHandler) LogoutUser(w http.ResponseWriter, r *http.Request) {
+	a.auth.LogoutHandler(w, r)
+
+}
+
+func (a *ApiHandler) GetUserWidget(w http.ResponseWriter, r *http.Request) {
+
+	claims, err := a.auth.GetClaims(r)
+	if err != nil {
+		http.Error(w, "Not Authenticated", http.StatusForbidden)
+		return
+	}
+	userWidgetContent := `
+	<p>Hallo, {{.Name}}    <u><a class="text-sky-600" href="/api2/user/logout">logout</a></u></p>
+
+	`
+	userWidget, err := template.New(userWidgetContent).Parse(userWidgetContent)
+	if err != nil {
+		log.Println("Error while templating the pop up")
+		return
+	}
+
+	err = userWidget.Execute(w, claims)
+	if err != nil {
+		log.Println("Error while filling out the Template or writing Response")
+	}
 }
 
 func (a *ApiHandler) GetTable(w http.ResponseWriter, r *http.Request) {

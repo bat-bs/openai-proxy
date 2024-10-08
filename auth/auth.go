@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -24,6 +25,11 @@ func Init(mux *http.ServeMux) (a *Auth) {
 	if err != nil {
 		// handle error
 		log.Println("Cannot Initiate Provider: ", err)
+	}
+	var claims *ProviderClaims
+	err = provider.Claims(&claims)
+	if err != nil {
+		log.Println("Cannot extract provider Claims for LogoutURL", err)
 	}
 
 	clientId, ok := os.LookupEnv("CLIENT_ID")
@@ -58,10 +64,15 @@ func Init(mux *http.ServeMux) (a *Auth) {
 		oauth2Config: oauth2Config,
 		ctx:          context.Background(),
 		verifier:     verifier,
+		claims:       claims,
 	}
 	mux.HandleFunc("/callback/", a.CallbackHandler)
 	mux.HandleFunc("/login/", a.LoginHandler)
 	return a
+}
+
+type ProviderClaims struct {
+	EndSessionURL string `json:"end_session_endpoint"`
 }
 
 type Claims struct {
@@ -76,8 +87,32 @@ type Auth struct {
 	oauth2Config *oauth2.Config
 	ctx          context.Context
 	verifier     *oidc.IDTokenVerifier
+	claims       *ProviderClaims
 }
 
+func (a *Auth) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	state, _ := r.Cookie("oauthstate")
+	http.SetCookie(w, &http.Cookie{
+		Name:    "session_token",
+		Path:    "/",
+		Value:   "",
+		Expires: time.Unix(0, 0),
+	})
+	if a.claims.EndSessionURL == "" {
+		http.Error(w, "Logout not implemented by Identity Provider", http.StatusNotImplemented)
+		return
+	}
+	logoutURL, err := url.Parse(a.claims.EndSessionURL)
+	if err != nil {
+		log.Println("Error parsing URL: ", err)
+	}
+	query := logoutURL.Query()
+	query.Set("state", state.Value)
+	query.Set("post_logout_redirect_uri", a.oauth2Config.RedirectURL) // Not implemented by our IDP of Testing https://github.com/zitadel/zitadel/issues/6615
+	logoutURL.RawQuery = query.Encode()
+
+	http.Redirect(w, r, logoutURL.String(), http.StatusTemporaryRedirect)
+}
 func (a *Auth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Create oauthState cookie
