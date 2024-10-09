@@ -1,0 +1,37 @@
+
+<table class="min-w-full divide-y dark:text-gray-200 divide-gray-200 shadow overflow-hidden rounded-lg">
+        <thead class="bg-gray-50 dark:bg-slate-800 dark:text-white text-gray-500">
+            <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                    User
+                </th>
+                <!-- <th class="px-6 py-3 text-left text-xs font-medium  uppercase tracking-wider">
+                    Schnittstelle
+                </th> -->
+                <th class="px-6 py-3   text-left text-xs font-medium uppercase tracking-wider">
+                    Genutzte Tokens
+                </th>
+        </thead>
+        <tbody id="table-body" class="bg-white dark:bg-slate-900 divide-y divide-gray-200">
+            <!-- Daten-Rows, generiert durch Ihren Server -->
+        {{ $length := len . }}
+        {{ if gt $length 0 }}
+        {{ range . }}
+        <tr>
+            <td name="keyid" class="px-6 py-4 whitespace-nowrap">
+                {{ .Owner }}
+            </td>
+            <!-- <td class="px-6 py-4 whitespace-nowrap">
+                {{ .AiApi }}
+            </td> -->
+            <td class="px-6 py-4 whitespace-nowrap">
+                {{ if .TokenCountPrompt }}{{ add .TokenCountPrompt .TokenCountComplete }}{{ else }}0{{ end }}
+            </td>
+        </tr>
+        {{ end }}
+        {{ end }}
+        <!-- Weitere Zeilen folgen je nach Daten -->
+    </tbody>
+</table>
+
+

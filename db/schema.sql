@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS company (
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(255) NOT NULL UNIQUE PRIMARY KEY,
     name VARCHAR(255),
+    is_admin BOOLEAN,
     company_id bigint REFERENCES company(id)
 
 );

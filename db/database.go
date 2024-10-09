@@ -14,12 +14,11 @@ type Database struct {
 }
 
 type ApiKey struct {
-	UUID               string   // ID that will be displayed in UI
-	ApiKey             string   // Backend, not implemented yet
-	Owner              string   // sub from oidc claims
-	Groups             []string // groups from oidc claims
-	AiApi              string   // can be openai or azure
-	Description        string   // optional, user can describe his key
+	UUID               string // ID that will be displayed in UI
+	ApiKey             string // Backend, not implemented yet
+	Owner              string // sub from oidc claims or name string on return
+	AiApi              string // can be openai or azure
+	Description        string // optional, user can describe his key
 	TokenCountPrompt   *int
 	TokenCountComplete *int
 }
@@ -94,27 +93,47 @@ func (d *Database) LookupDatabasePath() string {
 }
 
 type User struct {
-	Name string
-	Sub  string
+	Name    string
+	Sub     string
+	IsAdmin bool
 }
 
-func (d *Database) CheckUser(u *User) (err error) {
+func (d *Database) GetUser(uid string) (*User, error) {
 	var sub string
 	var name sql.NullString
+	var isadmin sql.NullBool
+	err := d.db.QueryRow("SELECT id,name,is_admin FROM users WHERE id = $1", uid).Scan(&sub, &name, &isadmin)
+	if err != nil {
+		return nil, err
+	}
+	return &User{
+		Name:    name.String,
+		Sub:     sub,
+		IsAdmin: isadmin.Bool,
+	}, nil
 
-	err1 := d.db.QueryRow("SELECT id,name FROM users WHERE id = $1", u.Sub).Scan(&sub, &name)
+}
+
+func (d *Database) WriteUser(userClaim *User) (err error) {
+
+	userDB, err1 := d.GetUser(userClaim.Sub)
 	if err1 == sql.ErrNoRows {
-
-		_, err := d.db.Exec("INSERT INTO users id,name VALUES ($1, $2)", u.Sub, u.Name)
+		_, err := d.db.Exec("INSERT INTO users (id,name,is_admin) VALUES ($1, $2, $3)", userClaim.Sub, userClaim.Name, userClaim.IsAdmin)
 		if err != nil {
 			log.Printf("User Insert Failed: %v", err)
 			return err
 		}
+		return nil
 	} else if err1 != nil {
 		log.Println("Error reading User in DB: ", err1)
 		return err1
-	} else if u.Name != name.String {
-		_, err := d.db.Exec("UPDATE users SET name=$1 WHERE id=$2", u.Sub, u.Name)
+	} else if userClaim.Name != userDB.Name {
+		_, err := d.db.Exec("UPDATE users SET name=$1 WHERE id=$2", userClaim.Name, userClaim.Sub)
+		if err != nil {
+			log.Printf("User updating Failed: %v", err)
+		}
+	} else if userClaim.IsAdmin != userDB.IsAdmin {
+		_, err := d.db.Exec("UPDATE users SET is_admin=$1 WHERE id=$2", userClaim.IsAdmin, userClaim.Sub)
 		if err != nil {
 			log.Printf("User updating Failed: %v", err)
 		}
@@ -164,6 +183,23 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	for rows.Next() {
 		var a ApiKey
 		if err := rows.Scan(&a.UUID, &a.Owner, &a.AiApi, &a.Description, &a.TokenCountPrompt, &a.TokenCountComplete); err != nil {
+			return apikeys, err
+		}
+		apikeys = append(apikeys, a)
+	}
+	return apikeys, nil
+}
+
+func (d *Database) LookupApiKeyUserOverview() ([]ApiKey, error) {
+	var apikeys []ApiKey
+	rows, err := d.db.Query("SELECT u.name,SUM(r.token_count_prompt),SUM(r.token_count_complete) FROM apiKeys a LEFT JOIN requests r ON a.UUID = r.api_key_id LEFT JOIN users u on a.Owner = u.id  WHERE u.name IS NOT NULL GROUP BY u.name")
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		var a ApiKey
+		if err := rows.Scan(&a.Owner, &a.TokenCountPrompt, &a.TokenCountComplete); err != nil {
 			return apikeys, err
 		}
 		apikeys = append(apikeys, a)
