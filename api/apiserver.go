@@ -66,7 +66,7 @@ func (a *ApiHandler) GetUserWidget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userWidgetContent := `
-	<p class="text-xl">{{if .IsAdmin }}<a class="text-sky-400" href="/admin">Admin-Panel</a> - <a class="text-sky-400" href="">Homepage</a>{{ end }} </p><p>Hallo, {{.Name}} <u><a class="text-sky-400" href="/api2/user/logout">logout</a></u></p>
+	<p class="text-xl">{{if .IsAdmin }}<a class="text-sky-400" href="/admin">Admin-Panel</a> - <a class="text-sky-400" href="/">Homepage</a>{{ end }} </p><p>Hallo, {{.Name}} <u><a class="text-sky-400" href="/api2/user/logout">logout</a></u></p>
 
 	`
 	userWidget, err := template.New(userWidgetContent).Parse(userWidgetContent)
