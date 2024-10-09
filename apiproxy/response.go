@@ -33,11 +33,13 @@ func NewResponse(in *http.Response) error {
 		rs: in,
 		db: db.NewDB(),
 	}
+
 	err := r.ReadValues()
 	if err != nil {
 		return err
 	}
 	go r.ProcessValues()
+	defer r.db.Close()
 	return nil
 }
 

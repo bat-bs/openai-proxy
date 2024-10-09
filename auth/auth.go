@@ -4,10 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
+
+	db "openai-api-proxy/db"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -24,6 +28,11 @@ func Init(mux *http.ServeMux) (a *Auth) {
 	if err != nil {
 		// handle error
 		log.Println("Cannot Initiate Provider: ", err)
+	}
+	var claims *ProviderClaims
+	err = provider.Claims(&claims)
+	if err != nil {
+		log.Println("Cannot extract provider Claims for LogoutURL", err)
 	}
 
 	clientId, ok := os.LookupEnv("CLIENT_ID")
@@ -50,7 +59,7 @@ func Init(mux *http.ServeMux) (a *Auth) {
 		Endpoint: provider.Endpoint(),
 
 		// "openid" is a required scope for OpenID Connect flows.
-		Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
+		Scopes: []string{oidc.ScopeOpenID, "profile", "email", "roles"},
 	}
 
 	var verifier = provider.Verifier(&oidc.Config{ClientID: clientId})
@@ -58,25 +67,57 @@ func Init(mux *http.ServeMux) (a *Auth) {
 		oauth2Config: oauth2Config,
 		ctx:          context.Background(),
 		verifier:     verifier,
+		provider:     provider,
+		claims:       claims,
 	}
 	mux.HandleFunc("/callback/", a.CallbackHandler)
 	mux.HandleFunc("/login/", a.LoginHandler)
 	return a
 }
 
+type ProviderClaims struct {
+	EndSessionURL string `json:"end_session_endpoint"`
+}
+
 type Claims struct {
 	Email    string   `json:"email"`
+	Name     string   `json:"name"`
 	Verified bool     `json:"email_verified"`
 	Sub      string   `json:"sub"`
-	Groups   []string `json:"groups"`
+	Roles    []string `json:"roles"`
 }
 
 type Auth struct {
 	oauth2Config *oauth2.Config
 	ctx          context.Context
 	verifier     *oidc.IDTokenVerifier
+	provider     *oidc.Provider
+	claims       *ProviderClaims
 }
 
+func (a *Auth) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	state, _ := r.Cookie("oauthstate")
+	http.SetCookie(w, &http.Cookie{
+		Name:    "session_token",
+		Path:    "/",
+		Value:   "",
+		Expires: time.Unix(0, 0),
+	})
+	if a.claims.EndSessionURL == "" {
+		http.Error(w, "Logout not implemented by Identity Provider", http.StatusNotImplemented)
+		return
+	}
+	logoutURL, err := url.Parse(a.claims.EndSessionURL)
+	if err != nil {
+		log.Println("Error parsing URL: ", err)
+	}
+	query := logoutURL.Query()
+	query.Set("state", state.Value)
+	query.Set("post_logout_redirect_uri", a.oauth2Config.RedirectURL) // Not implemented by our IDP of Testing https://github.com/zitadel/zitadel/issues/6615
+	logoutURL.RawQuery = query.Encode()
+
+	http.Redirect(w, r, logoutURL.String(), http.StatusTemporaryRedirect)
+}
 func (a *Auth) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Create oauthState cookie
@@ -127,16 +168,55 @@ func (a *Auth) GetClaims(r *http.Request) (*Claims, error) {
 	var err error
 	// Parse and verify ID Token payload.
 	rawIDToken, err := r.Cookie("session_token")
+	if err != nil {
+		return nil, err
+	}
 	idToken, err := a.verifier.Verify(a.ctx, rawIDToken.Value)
+	if err != nil {
+		return nil, err
+	}
 	claims := &Claims{}
 	// Extract custom claims
-	if err = idToken.Claims(claims); err != nil {
+
+	if err = idToken.Claims(&claims); err != nil {
 		log.Println("Error Extracting User-Claim", err)
 		return nil, err
 		// handle error
 	}
 	return claims, nil
 }
+
+type NotAdmin struct {
+	uid string
+}
+
+func (n *NotAdmin) Error() string {
+	return fmt.Sprintf("User %s has no Admin Role", n.uid)
+}
+
+func (a *Auth) ValidateAdminSession(w http.ResponseWriter, r *http.Request) (bool, error) {
+	authenticated := a.ValidateSessionToken(w, r)
+	if !authenticated {
+		log.Println("Not Authenticated")
+		return false, nil
+	}
+	claims, err := a.GetClaims(r)
+	if err != nil {
+		log.Println("Claims not found")
+		return false, err
+	}
+	db := db.NewDB()
+	defer db.Close()
+	user, err := db.GetUser(claims.Sub)
+	if err != nil {
+		return false, err
+	}
+	if user.IsAdmin {
+		return true, nil
+	}
+	return false, &NotAdmin{uid: claims.Sub}
+}
+
 func (a *Auth) ValidateSessionToken(w http.ResponseWriter, r *http.Request) bool {
 	// Parse and verify ID Token payload.
 	rawIDToken, err := r.Cookie("session_token")

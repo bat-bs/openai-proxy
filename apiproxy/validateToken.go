@@ -36,6 +36,7 @@ func ValidateToken(w http.ResponseWriter, r *http.Request) string {
 	}
 
 	db := db.NewDB()
+	defer db.Close()
 
 	hashes, err := db.LookupApiKeys("*")
 	if err != nil || len(hashes) == 0 {

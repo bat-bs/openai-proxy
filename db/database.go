@@ -1,14 +1,11 @@
 package database
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"os"
-	"regexp"
 
-	"ariga.io/atlas-go-sdk/atlasexec"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -17,12 +14,11 @@ type Database struct {
 }
 
 type ApiKey struct {
-	UUID               string   // ID that will be displayed in UI
-	ApiKey             string   // Backend, not implemented yet
-	Owner              string   // sub from oidc claims
-	Groups             []string // groups from oidc claims
-	AiApi              string   // can be openai or azure
-	Description        string   // optional, user can describe his key
+	UUID               string // ID that will be displayed in UI
+	ApiKey             string // Backend, not implemented yet
+	Owner              string // sub from oidc claims or name string on return
+	AiApi              string // can be openai or azure
+	Description        string // optional, user can describe his key
 	TokenCountPrompt   *int
 	TokenCountComplete *int
 }
@@ -34,6 +30,7 @@ func DatabaseInit() {
 	}
 
 	d := NewDB()
+	defer d.Close()
 	d.Migrate()
 	if _, err := d.db.Exec(string(createTable)); err != nil {
 		log.Fatal(err)
@@ -56,44 +53,13 @@ func NewDB() *Database {
 
 }
 
-func (d *Database) Migrate() {
-	// Define the execution context, supplying a migration directory
-	// and potentially an `atlas.hcl` configuration file using `atlasexec.WithHCL`.
-	workdir, err := atlasexec.NewWorkingDir(
-		atlasexec.WithMigrations(
-			os.DirFS("db/migrations"),
-		),
-	)
-	if err != nil {
-		log.Fatalf("failed to load working directory: %v", err)
-	}
-	// atlasexec works on a temporary directory, so we need to close it
-	defer workdir.Close()
-
-	// Initialize the client.
-	client, err := atlasexec.NewClient(workdir.Path(), "atlas")
-	if err != nil {
-		log.Fatalf("failed to initialize client: %v", err)
-	}
-
-	var atlasurl string
-
-	var re = regexp.MustCompile(`(postgresql://)([^?]*)(?:\?(.*))?`)
-	atlasurl = re.ReplaceAllString(databasePath, `postgres://$2?search_path=public&$3`)
-
-	// Run `atlas migrate apply` on a PSQL database
-	res, err := client.MigrateApply(context.Background(), &atlasexec.MigrateApplyParams{
-		URL: atlasurl,
-	})
-	if err != nil {
-		log.Fatalf("failed to apply migrations: %v", err)
-	}
-	fmt.Printf("Applied %d migrations\n", len(res.Applied))
-}
-
 // func (d *Database) CheckAndCreateUser(sub string) string {
 
 // }
+
+func (d *Database) Close() {
+	d.db.Close()
+}
 
 func (d *Database) LookupDatabasePath() string {
 	var path string
@@ -126,37 +92,64 @@ func (d *Database) LookupDatabasePath() string {
 	}
 }
 
-func (d *Database) CheckUser(a *ApiKey) (err error) {
-	var id string
-	err1 := d.db.QueryRow("SELECT id from users where id = $1", a.Owner).Scan(&id)
+type User struct {
+	Name    string
+	Sub     string
+	IsAdmin bool
+}
+
+func (d *Database) GetUser(uid string) (*User, error) {
+	var sub string
+	var name sql.NullString
+	var isadmin sql.NullBool
+	err := d.db.QueryRow("SELECT id,name,is_admin FROM users WHERE id = $1", uid).Scan(&sub, &name, &isadmin)
+	if err != nil {
+		return nil, err
+	}
+	return &User{
+		Name:    name.String,
+		Sub:     sub,
+		IsAdmin: isadmin.Bool,
+	}, nil
+
+}
+
+func (d *Database) WriteUser(userClaim *User) (err error) {
+
+	userDB, err1 := d.GetUser(userClaim.Sub)
 	if err1 == sql.ErrNoRows {
-		log.Println("User not found, creating in DB: ", err1)
-		_, err := d.db.Exec("INSERT INTO users (id) VALUES ($1)", a.Owner)
+		_, err := d.db.Exec("INSERT INTO users (id,name,is_admin) VALUES ($1, $2, $3)", userClaim.Sub, userClaim.Name, userClaim.IsAdmin)
 		if err != nil {
 			log.Printf("User Insert Failed: %v", err)
 			return err
 		}
+		return nil
 	} else if err1 != nil {
 		log.Println("Error reading User in DB: ", err1)
 		return err1
+	} else if userClaim.Name != userDB.Name {
+		_, err := d.db.Exec("UPDATE users SET name=$1 WHERE id=$2", userClaim.Name, userClaim.Sub)
+		if err != nil {
+			log.Printf("User updating Failed: %v", err)
+		}
+	} else if userClaim.IsAdmin != userDB.IsAdmin {
+		_, err := d.db.Exec("UPDATE users SET is_admin=$1 WHERE id=$2", userClaim.IsAdmin, userClaim.Sub)
+		if err != nil {
+			log.Printf("User updating Failed: %v", err)
+		}
 	}
 	return nil
 }
 
 func (d *Database) WriteEntry(a *ApiKey) error {
-
-	if err := d.CheckUser(a); err != nil {
-		return err
-	}
-
 	_, err := d.db.Exec("INSERT INTO apiKeys VALUES ($1, $2, $3, $4, $5)", a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description)
 	if err != nil {
 		log.Printf("Api-Key Insert Failed: %v", err)
 		return err
 	}
-
 	return nil
 }
+
 func (d *Database) DeleteEntry(key *string, uid string) {
 	log.Println("Deleting Key ", *key)
 	_, err := d.db.Exec("DELETE FROM apiKeys WHERE UUID=$1 AND Owner=$2", *key, uid)
@@ -190,6 +183,23 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	for rows.Next() {
 		var a ApiKey
 		if err := rows.Scan(&a.UUID, &a.Owner, &a.AiApi, &a.Description, &a.TokenCountPrompt, &a.TokenCountComplete); err != nil {
+			return apikeys, err
+		}
+		apikeys = append(apikeys, a)
+	}
+	return apikeys, nil
+}
+
+func (d *Database) LookupApiKeyUserOverview() ([]ApiKey, error) {
+	var apikeys []ApiKey
+	rows, err := d.db.Query("SELECT u.name,SUM(r.token_count_prompt),SUM(r.token_count_complete) FROM apiKeys a LEFT JOIN requests r ON a.UUID = r.api_key_id LEFT JOIN users u on a.Owner = u.id  WHERE u.name IS NOT NULL GROUP BY u.name")
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		var a ApiKey
+		if err := rows.Scan(&a.Owner, &a.TokenCountPrompt, &a.TokenCountComplete); err != nil {
 			return apikeys, err
 		}
 		apikeys = append(apikeys, a)
