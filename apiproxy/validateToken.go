@@ -32,11 +32,11 @@ func ValidateToken(w http.ResponseWriter, r *http.Request) string {
 	//fmt.Println("\"", apiKey, "\"")
 	if apiKey == "Bearer " {
 		http.Error(w, "401 - Token Empty", http.StatusUnauthorized)
+
 		return ""
 	}
 
 	db := db.NewDB()
-	defer db.Close()
 
 	hashes, err := db.LookupApiKeys("*")
 	if err != nil || len(hashes) == 0 {
