@@ -39,7 +39,6 @@ func NewResponse(in *http.Response) error {
 		return err
 	}
 	go r.ProcessValues()
-	defer r.db.Close()
 	return nil
 }
 
@@ -54,7 +53,6 @@ func (r *Response) GetApiKeyUUID() string {
 	}
 
 	uid, err := CompareToken(hashes, apiKey)
-	log.Println(uid, err)
 	return uid
 }
 func (r *Response) ReadValues() error {
@@ -71,6 +69,7 @@ func (r *Response) ReadValues() error {
 }
 
 func (r *Response) ProcessValues() {
+	defer r.db.Close()
 	c := r.content
 	if c.Object != "chat.completion" {
 		log.Printf("Untested API Endpoint '%s' is used, check the Request in the DB: %s", c.Object, c.ID)
@@ -92,6 +91,5 @@ func (r *Response) ProcessValues() {
 		log.Println(err)
 		return
 	}
-	log.Println("Written Request to DB")
 
 }

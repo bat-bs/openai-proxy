@@ -124,6 +124,7 @@ func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend string) {
 	azureToken := ValidateToken(w, r)
 	if azureToken == "" {
+		http.Error(w, "Error Processing Request", http.StatusUnauthorized)
 		return
 	}
 	r.Header.Set("Content-Type", "application/json")
