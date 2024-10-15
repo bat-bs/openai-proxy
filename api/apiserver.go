@@ -6,12 +6,18 @@ import (
 	"net/http"
 	auth "openai-api-proxy/auth"
 	db "openai-api-proxy/db"
+	"os"
 
 	"github.com/Masterminds/sprig/v3"
 )
 
 func ApiInit(mux *http.ServeMux, a *auth.Auth) {
-	api := ApiHandler{db.NewDB(), a}
+	timeZone, ok := os.LookupEnv("TIMEZONE")
+	if !ok {
+		timeZone = "Europe/Berlin"
+	}
+
+	api := ApiHandler{db.NewDB(), a, timeZone}
 	mux.HandleFunc("/api2/user/widget", api.GetUserWidget)
 	mux.HandleFunc("/api2/user/logout", api.LogoutUser)
 	mux.HandleFunc("/api2/admin/table/get", api.GetAdminTable)
@@ -23,8 +29,9 @@ func ApiInit(mux *http.ServeMux, a *auth.Auth) {
 }
 
 type ApiHandler struct {
-	db   *db.Database
-	auth *auth.Auth
+	db       *db.Database
+	auth     *auth.Auth
+	timeZone string
 }
 
 func (a *ApiHandler) GetAdminTable(w http.ResponseWriter, r *http.Request) {
@@ -94,7 +101,6 @@ func (a *ApiHandler) GetTable(w http.ResponseWriter, r *http.Request) {
 		a.Unauthenticated(w, r)
 	}
 	admin := false
-	log.Println(claims.Roles)
 	for _, group := range claims.Roles {
 		if group == "admin" {
 			admin = true

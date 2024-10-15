@@ -7,6 +7,7 @@ import (
 	"net/http"
 	db "openai-api-proxy/db"
 	"strings"
+	"time"
 
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/opts"
@@ -19,14 +20,12 @@ func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	key := strings.TrimPrefix(r.URL.Path, "/api2/admin/table/graph/get/")
-	log.Println(key)
 	data, err := a.db.LookupApiKeyUserStats(key)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, "Could not get Data from DB for User "+string(key), 500)
 		return
 	}
-	log.Println(data)
 	// create a new line instance
 	line := charts.NewLine()
 	// set some global options like Title/Legend/ToolTip or anything else
@@ -90,7 +89,15 @@ func (a *ApiHandler) GetAdminTableGraphData(d []db.RequestSummary) TableData {
 	for _, item := range d {
 		totalTokens = item.TokenCountComplete + item.TokenCountPrompt
 		td.data = append(td.data, opts.LineData{Value: totalTokens})
-		td.timeAxis = append(td.timeAxis, item.RequestTime.Format("15:04"))
+		loc, err := time.LoadLocation(a.timeZone)
+		if err != nil {
+			log.Println("Error Displaying Timezone, maybe the TIMEZONE env is wrongly set")
+			td.timeAxis = append(td.timeAxis, item.RequestTime.Format("15:04"))
+			continue
+		}
+		localTime := item.RequestTime.In(loc)
+		td.timeAxis = append(td.timeAxis, localTime.Format("15:04"))
+
 	}
 	return td
 }
