@@ -1,5 +1,43 @@
 
 <script src=" https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js "></script>
+<script>
+  // Function to get query parameter by name
+  function getQueryParameter(name) {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get(name);
+  }
+
+  // Get the current filter value from query parameters
+  const filter = getQueryParameter('filter');
+
+  // Highlight the button matching the filter value
+  if (filter) {
+    const selectedButton = document.getElementById('btn-' + filter);
+    if (selectedButton) {
+      selectedButton.classList.add('bg-blue-500'); // Add class to highlight
+      selectedButton.classList.remove('bg-blue-300'); // Remove the default class
+    }
+  }
+</script>
+
+<div class="flex max-w-screen justify-end mb-3">
+  <a href="?filter=24h">
+    <button id="btn-24h" class="bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-2 px-4 rounded-l">
+        24 Hours
+    </button>
+  </a>
+  <a href="?filter=7d">
+  <button id="btn-7d" class="justify-end bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-2 px-4 ">
+    7 Days
+  </button>
+  </a>
+  <a href="?filter=30d">
+  <button id="btn-30d" class="justify-end bg-blue-300 hover:bg-blue-500 text-gray-800 font-bold py-2 px-4  rounded-r">
+    30 Days
+  </button>
+  </a>
+</div>
+
 <table class="min-w-full divide-y dark:text-gray-200 divide-gray-200 shadow overflow-hidden rounded-lg">
         <thead class="bg-gray-50 dark:bg-slate-800 dark:text-white text-gray-500">
             <tr>
