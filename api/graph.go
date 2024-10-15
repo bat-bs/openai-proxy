@@ -13,6 +13,11 @@ import (
 )
 
 func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) {
+	ok, err := a.auth.ValidateAdminSession(w, r)
+	if err != nil || !ok {
+		http.Error(w, "Not Authorized", http.StatusForbidden)
+		return
+	}
 	key := strings.TrimPrefix(r.URL.Path, "/api2/admin/table/graph/get/")
 	log.Println(key)
 	data, err := a.db.LookupApiKeyUserStats(key)
