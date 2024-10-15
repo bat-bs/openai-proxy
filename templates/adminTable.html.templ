@@ -12,6 +12,9 @@
 
   // Highlight the button matching the filter value
   if (filter) {
+    const filterInHeading = document.getElementById("heading-filter");
+    filterInHeading.innerHTML = filter;
+
     const selectedButton = document.getElementById('btn-' + filter);
     if (selectedButton) {
       selectedButton.classList.add('bg-blue-500'); // Add class to highlight
@@ -48,7 +51,7 @@
                     Genutzte Tokens (Gesamt)
                 </th>
                 <th class="px-6 py-3   text-left text-xs font-medium uppercase tracking-wider">
-                    Genutzte Token (24h)
+                    Genutzte Token (<span id="heading-filter">24h</span>)
                 </th>
         </thead>
         <tbody id="table-body" class="bg-white dark:bg-slate-900 divide-y divide-gray-200">

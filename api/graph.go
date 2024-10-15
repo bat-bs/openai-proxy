@@ -32,11 +32,9 @@ func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) 
 	}
 
 	params, err := url.ParseQuery(currentURL.RawQuery)
-	log.Println(params)
 	paramFilter := params.Get("filter")
 	if err == nil && paramFilter != "" {
 		selectedfilter = paramFilter
-		log.Println("Set Filter to ", selectedfilter, err)
 	}
 
 	// Use Switch Case for Sanitization of upcoming SQL Statement and simpler querys in Web UI
