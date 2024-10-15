@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	db "openai-api-proxy/db"
 	"strings"
 	"time"
@@ -14,18 +15,46 @@ import (
 )
 
 func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) {
+
 	ok, err := a.auth.ValidateAdminSession(w, r)
 	if err != nil || !ok {
 		http.Error(w, "Not Authorized", http.StatusForbidden)
 		return
 	}
+
 	key := strings.TrimPrefix(r.URL.Path, "/api2/admin/table/graph/get/")
-	data, err := a.db.LookupApiKeyUserStats(key)
+
+	selectedfilter := "24h" // default Value
+	header := r.Header.Get("HX-Current-URL")
+	currentURL, err := url.Parse(header)
+	if err != nil {
+		log.Println("Error Parsing HX-Current-URL for Graph Table")
+	}
+
+	params, err := url.ParseQuery(currentURL.RawQuery)
+	paramFilter := params.Get("filter")
+	if err == nil && paramFilter != "" {
+		selectedfilter = paramFilter
+	}
+
+	// Use Switch Case for Sanitization of upcoming SQL Statement and simpler querys in Web UI
+	filter := "24 Hours"
+	switch selectedfilter {
+	case "24h":
+		filter = "24 Hours"
+	case "7d":
+		filter = "7 days"
+	case "30d":
+		filter = "30 days"
+	}
+
+	data, err := a.db.LookupApiKeyUserStats(key, filter)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, "Could not get Data from DB for User "+string(key), 500)
 		return
 	}
+
 	// create a new line instance
 	line := charts.NewLine()
 	// set some global options like Title/Legend/ToolTip or anything else
@@ -38,12 +67,11 @@ func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) 
 		// charts.WithVisualMapOpts(opts.VisualMap{Show: opts.Bool(false)})
 	)
 
-	selectedfilter := "24h"
 	// Put data into instance
-	td := a.GetAdminTableGraphData(data)
+	td := a.GetAdminTableGraphData(data, filter)
 
 	line.SetXAxis(td.timeAxis).
-		AddSeries(fmt.Sprintf("last %s", selectedfilter), td.data)
+		AddSeries(fmt.Sprintf("last %s", filter), td.data)
 	// Where the magic happens
 	chartSnippet := line.RenderSnippet()
 
@@ -78,13 +106,22 @@ type TableData struct {
 	timeAxis []string
 }
 
-func (a *ApiHandler) GetAdminTableGraphData(d []db.RequestSummary) TableData {
+func (a *ApiHandler) GetAdminTableGraphData(d []db.RequestSummary, filter string) TableData {
 
 	td := TableData{
 		data:     make([]opts.LineData, 0),
 		timeAxis: make([]string, 0),
 	}
 	var totalTokens int
+	format := "15:04"
+	switch filter {
+	case "24 Hours":
+		format = "15:04"
+	case "7 days":
+		format = "Mon"
+	case "30 days":
+		format = "02"
+	}
 
 	for _, item := range d {
 		totalTokens = item.TokenCountComplete + item.TokenCountPrompt
@@ -92,11 +129,11 @@ func (a *ApiHandler) GetAdminTableGraphData(d []db.RequestSummary) TableData {
 		loc, err := time.LoadLocation(a.timeZone)
 		if err != nil {
 			log.Println("Error Displaying Timezone, maybe the TIMEZONE env is wrongly set")
-			td.timeAxis = append(td.timeAxis, item.RequestTime.Format("15:04"))
+			td.timeAxis = append(td.timeAxis, item.RequestTime.Format(format))
 			continue
 		}
 		localTime := item.RequestTime.In(loc)
-		td.timeAxis = append(td.timeAxis, localTime.Format("15:04"))
+		td.timeAxis = append(td.timeAxis, localTime.Format(format))
 
 	}
 	return td

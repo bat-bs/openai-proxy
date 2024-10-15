@@ -204,22 +204,29 @@ type RequestSummary struct {
 	TokenCountComplete int
 }
 
-func (d *Database) LookupApiKeyUserStats(uid string) ([]RequestSummary, error) {
-	rows, err := d.db.Query(`
-			SELECT 
-				u.id,
-				SUM(r.token_count_prompt),
-				SUM(r.token_count_complete),
-				date_trunc('hour', r.request_time) AS request_hour
-			FROM requests r
-			INNER JOIN apikeys a ON r.api_key_id = a.UUID
-			INNER JOIN users u on a.Owner = u.id 
-			WHERE 
-				u.id = $1
-				AND r.request_time >= NOW() - INTERVAL '24 hours'
-			GROUP BY u.id, request_hour
-			ORDER BY request_hour;
-			`, uid)
+func (d *Database) LookupApiKeyUserStats(uid string, filter string) ([]RequestSummary, error) {
+	dateTrunc := "day"
+	if filter == "24 Hours" {
+		dateTrunc = "hour"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			u.id,
+			SUM(r.token_count_prompt),
+			SUM(r.token_count_complete),
+			date_trunc('%s', r.request_time) AS request_hour
+		FROM requests r
+		INNER JOIN apikeys a ON r.api_key_id = a.UUID
+		INNER JOIN users u on a.Owner = u.id 
+		WHERE 
+			u.id = $1
+			AND r.request_time >= NOW() - INTERVAL '%s'
+		GROUP BY u.id, request_hour
+		ORDER BY request_hour;`,
+		dateTrunc, filter)
+
+	rows, err := d.db.Query(query, uid)
 	if err != nil {
 		return nil, err
 	}
