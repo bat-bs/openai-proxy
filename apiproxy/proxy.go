@@ -197,7 +197,6 @@ func (h *baseHandle) SetAzureUrl(r *http.Request) *url.URL {
 	model := h.az.RessourceName
 	if oaibody.Model != "" {
 		model = oaibody.Model
-		log.Println("Routing Request to Model: ", model)
 	}
 
 	azureUrl := fmt.Sprintf("https://%s.%s/openai/deployments/%s", h.az.DeploymentName, h.az.BaseUrl, model)
