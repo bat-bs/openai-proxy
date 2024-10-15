@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -175,7 +176,12 @@ func (d *Database) WriteRequest(r *Request) error {
 
 func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
-	rows, err := d.db.Query("SELECT a.UUID,a.Owner,a.AiApi,a.Description,SUM(r.token_count_prompt),SUM(r.token_count_complete) FROM apiKeys a LEFT JOIN requests r ON a.UUID = r.api_key_id WHERE Owner=$1 GROUP BY a.UUID", uid)
+	rows, err := d.db.Query(`
+		SELECT a.UUID,a.Owner,a.AiApi,a.Description,SUM(r.token_count_prompt),SUM(r.token_count_complete)
+		FROM apiKeys a
+		LEFT JOIN requests r ON a.UUID = r.api_key_id
+		WHERE Owner=$1
+		GROUP BY a.UUID`, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -190,21 +196,74 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	return apikeys, nil
 }
 
-func (d *Database) LookupApiKeyUserOverview() ([]ApiKey, error) {
-	var apikeys []ApiKey
-	rows, err := d.db.Query("SELECT u.name,SUM(r.token_count_prompt),SUM(r.token_count_complete) FROM apiKeys a LEFT JOIN requests r ON a.UUID = r.api_key_id LEFT JOIN users u on a.Owner = u.id  WHERE u.name IS NOT NULL GROUP BY u.name")
+type RequestSummary struct {
+	Uid                string
+	Name               string
+	RequestTime        time.Time
+	TokenCountPrompt   int
+	TokenCountComplete int
+}
+
+func (d *Database) LookupApiKeyUserStats(uid string) ([]RequestSummary, error) {
+	rows, err := d.db.Query(`
+			SELECT 
+				u.id,
+				SUM(r.token_count_prompt),
+				SUM(r.token_count_complete),
+				date_trunc('hour', r.request_time) AS request_hour
+			FROM requests r
+			INNER JOIN apikeys a ON r.api_key_id = a.UUID
+			INNER JOIN users u on a.Owner = u.id 
+			WHERE 
+				u.id = $1
+				AND r.request_time >= NOW() - INTERVAL '24 hours'
+			GROUP BY u.id, request_hour
+			ORDER BY request_hour;
+			`, uid)
+	if err != nil {
+		return nil, err
+	}
+	var summary []RequestSummary
+	for rows.Next() {
+		var rq RequestSummary
+		if err := rows.Scan(&rq.Uid, &rq.TokenCountPrompt, &rq.TokenCountComplete, &rq.RequestTime); err != nil {
+			return summary, err
+		}
+		summary = append(summary, rq)
+	}
+	return summary, nil
+}
+func (d *Database) LookupApiKeyUserOverview() ([]RequestSummary, error) {
+	var summary []RequestSummary
+	rows, err := d.db.Query(`
+			SELECT
+				u.name,
+				u.id,
+				SUM(r.token_count_prompt),
+				SUM(r.token_count_complete)
+			FROM apiKeys a
+			LEFT JOIN users u on a.Owner = u.id 
+			LEFT JOIN requests r ON a.UUID = r.api_key_id
+			WHERE 
+				u.name IS NOT NULL
+				AND u.name <> ''
+			GROUP BY u.id, u.name
+			`)
 	if err != nil {
 		return nil, err
 	}
 
 	for rows.Next() {
-		var a ApiKey
-		if err := rows.Scan(&a.Owner, &a.TokenCountPrompt, &a.TokenCountComplete); err != nil {
-			return apikeys, err
+		var rq RequestSummary
+		var tokenprompt, tokencomplete sql.NullInt64
+		if err := rows.Scan(&rq.Name, &rq.Uid, &tokenprompt, &tokencomplete); err != nil {
+			return summary, err
 		}
-		apikeys = append(apikeys, a)
+		rq.TokenCountPrompt = int(tokenprompt.Int64)
+		rq.TokenCountComplete = int(tokencomplete.Int64)
+		summary = append(summary, rq)
 	}
-	return apikeys, nil
+	return summary, nil
 }
 
 func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
