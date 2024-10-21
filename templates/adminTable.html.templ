@@ -51,7 +51,7 @@
                     Genutzte Tokens (Gesamt)
                 </th>
                 <th class="px-6 py-3   text-left text-xs font-medium uppercase tracking-wider">
-                    Genutzte Token (<span id="heading-filter">24h</span>)
+                    &emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;Genutzte Token (<span id="heading-filter">24h</span>)
                 </th>
         </thead>
         <tbody id="table-body" class="bg-white dark:bg-slate-900 divide-y divide-gray-200">
@@ -67,7 +67,7 @@
                 {{ if .TokenCountPrompt }}{{ add .TokenCountPrompt .TokenCountComplete }}{{ else }}0{{ end }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
-                <div id="user-widget" hx-get="/api2/admin/table/graph/get/{{.Uid}}" hx-swap="innerHTML" class="" hx-trigger="load"></div>
+                <div id="user-widget" hx-get="/api2/admin/table/graph/get/{{.ID}}" hx-swap="innerHTML" class="" hx-trigger="load"></div>
             </td>
         </tr>
         {{ end }}
