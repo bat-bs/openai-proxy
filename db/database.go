@@ -197,34 +197,40 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 }
 
 type RequestSummary struct {
-	Uid                string
+	ID                 string
 	Name               string
 	RequestTime        time.Time
 	TokenCountPrompt   int
 	TokenCountComplete int
 }
 
-func (d *Database) LookupApiKeyUserStats(uid string, filter string) ([]RequestSummary, error) {
+func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string) ([]RequestSummary, error) {
 	dateTrunc := "day"
 	if filter == "24 Hours" {
 		dateTrunc = "hour"
 	}
 
+	// handle "user" view for admintable and "apiKey" view for usertable
+	if kind == "user" {
+		kind = "u.id"
+	} else if kind == "apiKey" {
+		kind = "a.UUID"
+	}
 	query := fmt.Sprintf(`
 		SELECT
-			u.id,
+			%[1]s,
 			SUM(r.token_count_prompt),
 			SUM(r.token_count_complete),
-			date_trunc('%s', r.request_time) AS request_hour
+			date_trunc('%[2]s', r.request_time) AS request_hour
 		FROM requests r
-		INNER JOIN apikeys a ON r.api_key_id = a.UUID
+		INNER JOIN apikeys a ON a.UUID = r.api_key_id 
 		INNER JOIN users u on a.Owner = u.id 
 		WHERE 
-			u.id = $1
-			AND r.request_time >= NOW() - INTERVAL '%s'
-		GROUP BY u.id, request_hour
+			%[1]s = $1
+			AND r.request_time >= NOW() - INTERVAL '%[3]s'
+		GROUP BY %[1]s, request_hour
 		ORDER BY request_hour;`,
-		dateTrunc, filter)
+		kind, dateTrunc, filter)
 
 	rows, err := d.db.Query(query, uid)
 	if err != nil {
@@ -233,7 +239,7 @@ func (d *Database) LookupApiKeyUserStats(uid string, filter string) ([]RequestSu
 	var summary []RequestSummary
 	for rows.Next() {
 		var rq RequestSummary
-		if err := rows.Scan(&rq.Uid, &rq.TokenCountPrompt, &rq.TokenCountComplete, &rq.RequestTime); err != nil {
+		if err := rows.Scan(&rq.ID, &rq.TokenCountPrompt, &rq.TokenCountComplete, &rq.RequestTime); err != nil {
 			return summary, err
 		}
 		summary = append(summary, rq)
@@ -263,7 +269,7 @@ func (d *Database) LookupApiKeyUserOverview() ([]RequestSummary, error) {
 	for rows.Next() {
 		var rq RequestSummary
 		var tokenprompt, tokencomplete sql.NullInt64
-		if err := rows.Scan(&rq.Name, &rq.Uid, &tokenprompt, &tokencomplete); err != nil {
+		if err := rows.Scan(&rq.Name, &rq.ID, &tokenprompt, &tokencomplete); err != nil {
 			return summary, err
 		}
 		rq.TokenCountPrompt = int(tokenprompt.Int64)

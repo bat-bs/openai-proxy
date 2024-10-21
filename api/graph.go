@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -14,6 +15,29 @@ import (
 	"github.com/go-echarts/go-echarts/v2/opts"
 )
 
+type Graph struct {
+	key  string
+	kind string // can be "user" or "apiKey"
+	w    http.ResponseWriter
+	r    *http.Request
+}
+
+func (a *ApiHandler) GetTableGraph(w http.ResponseWriter, r *http.Request) {
+	ok := a.auth.ValidateSessionToken(w, r)
+	if !ok {
+		http.Error(w, "Not Authorized", http.StatusForbidden)
+		return
+	}
+	key := strings.TrimPrefix(r.URL.Path, "/api2/table/graph/get/")
+	a.RenderGraph(&Graph{
+		key:  key,
+		kind: "apiKey",
+		w:    w,
+		r:    r,
+	})
+
+}
+
 func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) {
 
 	ok, err := a.auth.ValidateAdminSession(w, r)
@@ -23,9 +47,19 @@ func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) 
 	}
 
 	key := strings.TrimPrefix(r.URL.Path, "/api2/admin/table/graph/get/")
+	a.RenderGraph(&Graph{
+		key:  key,
+		kind: "user",
+		w:    w,
+		r:    r,
+	})
+
+}
+
+func (a *ApiHandler) RenderGraph(g *Graph) {
 
 	selectedfilter := "24h" // default Value
-	header := r.Header.Get("HX-Current-URL")
+	header := g.r.Header.Get("HX-Current-URL")
 	currentURL, err := url.Parse(header)
 	if err != nil {
 		log.Println("Error Parsing HX-Current-URL for Graph Table")
@@ -48,10 +82,10 @@ func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) 
 		filter = "30 days"
 	}
 
-	data, err := a.db.LookupApiKeyUserStats(key, filter)
+	data, err := a.db.LookupApiKeyUserStats(g.key, g.kind, filter)
 	if err != nil {
 		log.Println(err)
-		http.Error(w, "Could not get Data from DB for User "+string(key), 500)
+		http.Error(g.w, "Could not get Data from DB for User "+string(g.key), 500)
 		return
 	}
 
@@ -68,7 +102,10 @@ func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) 
 	)
 
 	// Put data into instance
-	td := a.GetAdminTableGraphData(data, filter)
+	td, err := a.GetAdminTableGraphData(g.w, data, filter)
+	if err != nil {
+		return
+	}
 
 	line.SetXAxis(td.timeAxis).
 		AddSeries(fmt.Sprintf("last %s", filter), td.data)
@@ -92,13 +129,14 @@ func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) 
 		Option:  template.HTML(chartSnippet.Option),
 	}
 	// var buf bytes.Buffer
-	if err := t.Execute(w, snippetData); err != nil {
+	if err := t.Execute(g.w, snippetData); err != nil {
 		log.Println("Error Templating Chart", err)
 		return
 	}
 
 	// line.RenderSnippet()
 	// log.Println(buf.String())
+
 }
 
 type TableData struct {
@@ -106,9 +144,9 @@ type TableData struct {
 	timeAxis []string
 }
 
-func (a *ApiHandler) GetAdminTableGraphData(d []db.RequestSummary, filter string) TableData {
+func (a *ApiHandler) GetAdminTableGraphData(w http.ResponseWriter, d []db.RequestSummary, filter string) (*TableData, error) {
 
-	td := TableData{
+	td := &TableData{
 		data:     make([]opts.LineData, 0),
 		timeAxis: make([]string, 0),
 	}
@@ -122,7 +160,11 @@ func (a *ApiHandler) GetAdminTableGraphData(d []db.RequestSummary, filter string
 	case "30 days":
 		format = "02"
 	}
-
+	if len(d) < 1 {
+		http.Error(w, "&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;No Data", 200)
+		err := errors.New("data for Key is Empty")
+		return nil, err
+	}
 	for _, item := range d {
 		totalTokens = item.TokenCountComplete + item.TokenCountPrompt
 		td.data = append(td.data, opts.LineData{Value: totalTokens})
@@ -136,5 +178,5 @@ func (a *ApiHandler) GetAdminTableGraphData(d []db.RequestSummary, filter string
 		td.timeAxis = append(td.timeAxis, localTime.Format(format))
 
 	}
-	return td
+	return td, nil
 }

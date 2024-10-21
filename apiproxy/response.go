@@ -52,7 +52,7 @@ func (r *Response) GetApiKeyUUID() string {
 		log.Println("Error while requesting API Keys from DB", err)
 	}
 
-	uid, err := CompareToken(hashes, apiKey)
+	uid, _ := CompareToken(hashes, apiKey)
 	return uid
 }
 func (r *Response) ReadValues() error {
