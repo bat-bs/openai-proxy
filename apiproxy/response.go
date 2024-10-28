@@ -11,9 +11,13 @@ import (
 	"strings"
 )
 
+type ResponseConf struct {
+	db *db.Database
+}
+
 type Response struct {
 	rs       *http.Response
-	db       *db.Database
+	rc       *ResponseConf
 	apiKeyID string
 	content  Content
 }
@@ -27,18 +31,18 @@ type Content struct {
 	} `json:"usage"`
 }
 
-func NewResponse(in *http.Response) error {
+func (rc *ResponseConf) NewResponse(in *http.Response) error {
 
 	r := Response{
 		rs: in,
-		db: db.NewDB(),
+		rc: rc,
 	}
 
 	err := r.ReadValues()
 	if err != nil {
 		return err
 	}
-	go r.ProcessValues()
+	r.ProcessValues()
 	return nil
 }
 
@@ -47,7 +51,7 @@ func (r *Response) GetApiKeyUUID() string {
 
 	apiKey := strings.TrimPrefix(header, "Bearer ")
 
-	hashes, err := r.db.LookupApiKeys("*")
+	hashes, err := r.rc.db.LookupApiKeys("*")
 	if err != nil || len(hashes) == 0 {
 		log.Println("Error while requesting API Keys from DB", err)
 	}
@@ -69,7 +73,6 @@ func (r *Response) ReadValues() error {
 }
 
 func (r *Response) ProcessValues() {
-	defer r.db.Close()
 	c := r.content
 	if c.Object != "chat.completion" {
 		log.Printf("Untested API Endpoint '%s' is used, check the Request in the DB: %s", c.Object, c.ID)
@@ -86,7 +89,7 @@ func (r *Response) ProcessValues() {
 		TokenCountComplete: c.Usage.CompletionTokens,
 		Model:              c.Model,
 	}
-	if err := r.db.WriteRequest(&rq); err != nil {
+	if err := r.rc.db.WriteRequest(&rq); err != nil {
 		log.Println("error processing Response: Response could not be written to db DB")
 		log.Println(err)
 		return

@@ -25,7 +25,7 @@ func CompareToken(hashes []db.ApiKey, apiKey string) (string, error) {
 	return "", err
 }
 
-func ValidateToken(w http.ResponseWriter, r *http.Request) string {
+func (h *baseHandle) ValidateToken(w http.ResponseWriter, r *http.Request) string {
 	header := r.Header.Get(authHeader)
 
 	apiKey := strings.TrimPrefix(header, "Bearer ")
@@ -36,9 +36,7 @@ func ValidateToken(w http.ResponseWriter, r *http.Request) string {
 		return ""
 	}
 
-	db := db.NewDB()
-
-	hashes, err := db.LookupApiKeys("*")
+	hashes, err := h.db.LookupApiKeys("*")
 	if err != nil || len(hashes) == 0 {
 		log.Println("Error while requesting API Keys from DB", err)
 		http.Error(w, "401 - Token Invalid", http.StatusUnauthorized)
