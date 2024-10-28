@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	db "openai-api-proxy/db"
 	"os"
 	"strings"
 )
@@ -42,7 +43,7 @@ var (
 	backendProxy = make(map[string]*httputil.ReverseProxy)
 )
 
-func Init(mux *http.ServeMux) {
+func Init(mux *http.ServeMux, db *db.Database) {
 	// Setup Azure Vars and Connection String
 	azconf := &AzureConfig{
 		DeploymentName: os.Getenv("DEPLOYMENT_NAME"),
@@ -51,14 +52,21 @@ func Init(mux *http.ServeMux) {
 		BaseUrl:        os.Getenv("BASE_URL"),
 	}
 	defaultBackend = os.Getenv("DEFAULT_BACKEND")
-
-	h := &baseHandle{azconf}
+	rc := &ResponseConf{
+		db: db,
+	}
+	h := &baseHandle{
+		db: db,
+		az: azconf,
+		rc: rc}
 	mux.Handle("/api/", h)
 
 }
 
 type baseHandle struct {
+	db *db.Database
 	az *AzureConfig
+	rc *ResponseConf
 }
 
 func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +130,7 @@ func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Since OpenAI and Azure API are not really compatible, we need 2 different handler functions
 func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend string) {
-	azureToken := ValidateToken(w, r)
+	azureToken := h.ValidateToken(w, r)
 	if azureToken == "" {
 		http.Error(w, "Error Processing Request", http.StatusUnauthorized)
 		return
@@ -150,7 +158,7 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	log.Printf("Proxying request to Azure backend: %s", actualURL.String())
 	r.Body.Close()
 
-	proxy.ModifyResponse = NewResponse
+	proxy.ModifyResponse = h.rc.NewResponse
 
 	proxy.ServeHTTP(w, r)
 

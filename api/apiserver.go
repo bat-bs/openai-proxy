@@ -11,13 +11,13 @@ import (
 	"github.com/Masterminds/sprig/v3"
 )
 
-func ApiInit(mux *http.ServeMux, a *auth.Auth) {
+func ApiInit(mux *http.ServeMux, a *auth.Auth, db *db.Database) {
 	timeZone, ok := os.LookupEnv("TIMEZONE")
 	if !ok {
 		timeZone = "Europe/Berlin"
 	}
 
-	api := ApiHandler{db.NewDB(), a, timeZone}
+	api := ApiHandler{db, a, timeZone}
 	mux.HandleFunc("/api2/user/widget", api.GetUserWidget)
 	mux.HandleFunc("/api2/user/logout", api.LogoutUser)
 	mux.HandleFunc("/api2/admin/table/get", api.GetAdminTable)

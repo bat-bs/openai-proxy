@@ -17,7 +17,7 @@ import (
 	"golang.org/x/oauth2"
 )
 
-func Init(mux *http.ServeMux) (a *Auth) {
+func Init(mux *http.ServeMux, db *db.Database) (a *Auth) {
 	ctx := context.Background()
 	issuer, ok := os.LookupEnv("ISSUER")
 	if !ok {
@@ -63,8 +63,10 @@ func Init(mux *http.ServeMux) (a *Auth) {
 	}
 
 	var verifier = provider.Verifier(&oidc.Config{ClientID: clientId})
+
 	a = &Auth{
 		oauth2Config: oauth2Config,
+		db:           db,
 		ctx:          context.Background(),
 		verifier:     verifier,
 		provider:     provider,
@@ -89,6 +91,7 @@ type Claims struct {
 
 type Auth struct {
 	oauth2Config *oauth2.Config
+	db           *db.Database
 	ctx          context.Context
 	verifier     *oidc.IDTokenVerifier
 	provider     *oidc.Provider
@@ -205,9 +208,8 @@ func (a *Auth) ValidateAdminSession(w http.ResponseWriter, r *http.Request) (boo
 		log.Println("Claims not found")
 		return false, err
 	}
-	db := db.NewDB()
-	defer db.Close()
-	user, err := db.GetUser(claims.Sub)
+
+	user, err := a.db.GetUser(claims.Sub)
 	if err != nil {
 		return false, err
 	}

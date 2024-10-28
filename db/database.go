@@ -24,18 +24,18 @@ type ApiKey struct {
 	TokenCountComplete *int
 }
 
-func DatabaseInit() {
+func DatabaseInit() *Database {
 	createTable, err := os.ReadFile("db/schema.sql")
 	if err != nil {
 		log.Fatal("cannot load schema file: ", err)
 	}
 
 	d := NewDB()
-	defer d.Close()
 	d.Migrate()
 	if _, err := d.db.Exec(string(createTable)); err != nil {
 		log.Fatal(err)
 	}
+	return d
 
 }
 
