@@ -120,7 +120,7 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 	// Where the magic happens
 	chartSnippet := line.RenderSnippet()
 
-	tmpl := "{{.Element}} {{.Script}}"
+	tmpl := "{{.Element}} <div class=\"content-center -ml-4 w-96 text-center text-xs grid\" ><i>{{.Filter}}: {{.TotalCount}}</i> </div> {{.Script}}"
 	t := template.New("snippet")
 	t, err = t.Parse(tmpl)
 	if err != nil {
@@ -128,13 +128,17 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 
 	}
 	snippetData := struct {
-		Element template.HTML
-		Script  template.HTML
-		Option  template.HTML
+		Element    template.HTML
+		Script     template.HTML
+		Option     template.HTML
+		TotalCount int
+		Filter     string
 	}{
-		Element: template.HTML(chartSnippet.Element),
-		Script:  template.HTML(chartSnippet.Script),
-		Option:  template.HTML(chartSnippet.Option),
+		Element:    template.HTML(chartSnippet.Element),
+		Script:     template.HTML(chartSnippet.Script),
+		Option:     template.HTML(chartSnippet.Option),
+		TotalCount: td.totalCount,
+		Filter:     filter,
 	}
 	// var buf bytes.Buffer
 	if err := t.Execute(g.w, snippetData); err != nil {
@@ -148,8 +152,9 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 }
 
 type TableData struct {
-	data     []opts.LineData
-	timeAxis []string
+	data       []opts.LineData
+	timeAxis   []string
+	totalCount int
 }
 
 func (a *ApiHandler) GetAdminTableGraphData(w http.ResponseWriter, d []db.RequestSummary, filter string) (*TableData, error) {
@@ -182,6 +187,7 @@ func (a *ApiHandler) GetAdminTableGraphData(w http.ResponseWriter, d []db.Reques
 	for _, item := range d {
 		totalTokens = item.TokenCountComplete + item.TokenCountPrompt
 		td.data = append(td.data, opts.LineData{Value: totalTokens})
+		td.totalCount = td.totalCount + totalTokens
 		loc, err := time.LoadLocation(a.timeZone)
 		if err != nil {
 			log.Println("Error Displaying Timezone, maybe the TIMEZONE env is wrongly set")
