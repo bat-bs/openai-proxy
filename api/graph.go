@@ -80,6 +80,14 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 		filter = "7 days"
 	case "30d":
 		filter = "30 days"
+	case "last-month":
+		filter = "Last Month"
+	case "this-month":
+		filter = "This Month"
+	case "last-year":
+		filter = "Last Year"
+	case "this-year":
+		filter = "This Year"
 	}
 
 	data, err := a.db.LookupApiKeyUserStats(g.key, g.kind, filter)
@@ -112,7 +120,7 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 	// Where the magic happens
 	chartSnippet := line.RenderSnippet()
 
-	tmpl := "{{.Element}} {{.Script}}"
+	tmpl := "{{.Element}} <div class=\"content-center -ml-4 w-96 text-center text-xs grid\" ><i>{{.Filter}}: {{.TotalCount}}</i> </div> {{.Script}}"
 	t := template.New("snippet")
 	t, err = t.Parse(tmpl)
 	if err != nil {
@@ -120,13 +128,17 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 
 	}
 	snippetData := struct {
-		Element template.HTML
-		Script  template.HTML
-		Option  template.HTML
+		Element    template.HTML
+		Script     template.HTML
+		Option     template.HTML
+		TotalCount int
+		Filter     string
 	}{
-		Element: template.HTML(chartSnippet.Element),
-		Script:  template.HTML(chartSnippet.Script),
-		Option:  template.HTML(chartSnippet.Option),
+		Element:    template.HTML(chartSnippet.Element),
+		Script:     template.HTML(chartSnippet.Script),
+		Option:     template.HTML(chartSnippet.Option),
+		TotalCount: td.totalCount,
+		Filter:     filter,
 	}
 	// var buf bytes.Buffer
 	if err := t.Execute(g.w, snippetData); err != nil {
@@ -140,8 +152,9 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 }
 
 type TableData struct {
-	data     []opts.LineData
-	timeAxis []string
+	data       []opts.LineData
+	timeAxis   []string
+	totalCount int
 }
 
 func (a *ApiHandler) GetAdminTableGraphData(w http.ResponseWriter, d []db.RequestSummary, filter string) (*TableData, error) {
@@ -152,22 +165,29 @@ func (a *ApiHandler) GetAdminTableGraphData(w http.ResponseWriter, d []db.Reques
 	}
 	var totalTokens int
 	format := "15:04"
+
 	switch filter {
 	case "24 Hours":
 		format = "15:04"
+
 	case "7 days":
 		format = "Mon"
-	case "30 days":
+	case "Last Month", "This Month", "30 days":
 		format = "02"
+	case "Last Year", "This Year":
+		format = "Jan"
 	}
+
 	if len(d) < 1 {
 		http.Error(w, "&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;No Data", 200)
 		err := errors.New("data for Key is Empty")
 		return nil, err
 	}
+
 	for _, item := range d {
 		totalTokens = item.TokenCountComplete + item.TokenCountPrompt
 		td.data = append(td.data, opts.LineData{Value: totalTokens})
+		td.totalCount = td.totalCount + totalTokens
 		loc, err := time.LoadLocation(a.timeZone)
 		if err != nil {
 			log.Println("Error Displaying Timezone, maybe the TIMEZONE env is wrongly set")
