@@ -205,33 +205,61 @@ type RequestSummary struct {
 }
 
 func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string) ([]RequestSummary, error) {
-	dateTrunc := "day"
-	if filter == "24 Hours" {
+	var dateTrunc string
+
+	// build sql condition based on filter
+	var condition string
+	switch filter {
+	case "24 Hours":
+		condition = "r.request_time >= NOW() - INTERVAL '1 day'"
 		dateTrunc = "hour"
+	case "30 days", "7 days":
+		condition = "r.request_time >= NOW() - INTERVAL '1 month'"
+		dateTrunc = "day"
+	case "This Month":
+		dateTrunc = "day"
+		condition = `
+			r.request_time >= date_trunc('month', current_timestamp)
+			AND r.request_time < date_trunc('month', current_timestamp) + interval '1 month'`
+	case "Last Month":
+		dateTrunc = "day"
+		condition = `
+			r.request_time >= date_trunc('month', current_timestamp) - interval '1 month'
+			AND r.request_time < date_trunc('month', current_timestamp)`
+	case "This Year":
+		dateTrunc = "month"
+		condition = `
+			r.request_time >= date_trunc('year', current_timestamp)
+			AND r.request_time < date_trunc('year', current_timestamp) + interval '1 year'`
+	case "Last Year":
+		dateTrunc = "month"
+		condition = `
+			r.request_time >= date_trunc('year', current_timestamp) - interval '1 year'
+			AND r.request_time < date_trunc('year', current_timestamp)`
 	}
 
 	// handle "user" view for admintable and "apiKey" view for usertable
 	if kind == "user" {
 		kind = "u.id"
-	} else if kind == "apiKey" {
+	} else {
 		kind = "a.UUID"
 	}
+
 	query := fmt.Sprintf(`
 		SELECT
 			%[1]s,
 			SUM(r.token_count_prompt),
 			SUM(r.token_count_complete),
-			date_trunc('%[2]s', r.request_time) AS request_hour
+			date_trunc('%[2]s', r.request_time) AS rq_time
 		FROM requests r
 		INNER JOIN apikeys a ON a.UUID = r.api_key_id 
 		INNER JOIN users u on a.Owner = u.id 
 		WHERE 
 			%[1]s = $1
-			AND r.request_time >= NOW() - INTERVAL '%[3]s'
-		GROUP BY %[1]s, request_hour
-		ORDER BY request_hour;`,
-		kind, dateTrunc, filter)
-
+			AND %[3]s
+		GROUP BY %[1]s, rq_time
+		ORDER BY rq_time;`,
+		kind, dateTrunc, condition)
 	rows, err := d.db.Query(query, uid)
 	if err != nil {
 		return nil, err

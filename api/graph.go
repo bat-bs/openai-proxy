@@ -80,6 +80,14 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 		filter = "7 days"
 	case "30d":
 		filter = "30 days"
+	case "last-month":
+		filter = "Last Month"
+	case "this-month":
+		filter = "This Month"
+	case "last-year":
+		filter = "Last Year"
+	case "this-year":
+		filter = "This Year"
 	}
 
 	data, err := a.db.LookupApiKeyUserStats(g.key, g.kind, filter)
@@ -152,19 +160,25 @@ func (a *ApiHandler) GetAdminTableGraphData(w http.ResponseWriter, d []db.Reques
 	}
 	var totalTokens int
 	format := "15:04"
+
 	switch filter {
 	case "24 Hours":
 		format = "15:04"
+
 	case "7 days":
 		format = "Mon"
-	case "30 days":
+	case "Last Month", "This Month", "30 days":
 		format = "02"
+	case "Last Year", "This Year":
+		format = "Jan"
 	}
+
 	if len(d) < 1 {
 		http.Error(w, "&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;No Data", 200)
 		err := errors.New("data for Key is Empty")
 		return nil, err
 	}
+
 	for _, item := range d {
 		totalTokens = item.TokenCountComplete + item.TokenCountPrompt
 		td.data = append(td.data, opts.LineData{Value: totalTokens})
