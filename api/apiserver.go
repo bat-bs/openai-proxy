@@ -18,11 +18,12 @@ func ApiInit(mux *http.ServeMux, a *auth.Auth, db *db.Database) {
 	}
 
 	api := ApiHandler{db, a, timeZone}
+	graph := NewGraphHandler(&api)
 	mux.HandleFunc("/api2/user/widget", api.GetUserWidget)
 	mux.HandleFunc("/api2/user/logout", api.LogoutUser)
 	mux.HandleFunc("/api2/admin/table/get", api.GetAdminTable)
-	mux.HandleFunc("/api2/admin/table/graph/get/", api.GetAdminTableGraph)
-	mux.HandleFunc("/api2/table/graph/get/", api.GetTableGraph)
+	mux.HandleFunc("/api2/admin/table/graph/get/", graph.GetAdminTableGraph)
+	mux.HandleFunc("/api2/table/graph/get/", graph.GetTableGraph)
 	mux.HandleFunc("/api2/table/get", api.GetTable)
 	mux.HandleFunc("/api2/table/entry/save", api.CreateEntry)
 	mux.HandleFunc("/api2/table/entry/delete/", api.DeleteEntry)

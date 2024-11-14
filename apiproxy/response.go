@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+// Process Response of Azure and Write Key Parameters to DB
+
 type ResponseConf struct {
 	db *db.Database
 }

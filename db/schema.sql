@@ -19,6 +19,17 @@ CREATE TABLE IF NOT EXISTS apiKeys (
     AiApi       VARCHAR(255),
     Description VARCHAR(255)
 );
+CREATE TABLE IF NOT EXISTS costs (
+    model VARCHAR(255) NOT NULL,
+    price integer NOT NULL,
+    request_day date DEFAULT now(),
+    token_type VARCHAR(255), 
+    unit_of_messure VARCHAR(255),
+    is_regional BOOLEAN,
+    backend_name VARCHAR(255),
+    currency CHAR(3),
+    PRIMARY KEY(model,request_day,token_type,is_regional,price,backend_name)
+);
 
 CREATE TABLE IF NOT EXISTS requests (
     id VARCHAR(255) NOT NULL PRIMARY KEY,

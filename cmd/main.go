@@ -6,11 +6,13 @@ import (
 	api "openai-api-proxy/api"
 	proxy "openai-api-proxy/apiproxy"
 	auth "openai-api-proxy/auth"
+	costs "openai-api-proxy/costs"
 	db "openai-api-proxy/db"
 	web "openai-api-proxy/webui"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -23,6 +25,11 @@ func main() {
 	}
 	db := db.DatabaseInit()
 	defer db.Close()
+
+	ticker := time.NewTicker(24 * time.Hour)
+
+	go costs.GetAllCosts(db, ticker.C)
+
 	osExit(db)
 	defer log.Println("Closing DB Clients :)")
 
