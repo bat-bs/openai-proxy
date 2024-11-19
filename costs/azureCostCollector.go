@@ -8,7 +8,7 @@ import (
 	"log"
 	"net/http"
 	db "openai-api-proxy/db"
-	"regexp"
+	"strings"
 	"time"
 )
 
@@ -30,24 +30,42 @@ type Costs struct {
 const MoneyUnit = 10000000
 
 func GetAllCosts(d *db.Database, g <-chan time.Time) {
+	regional := true
+	var region string
+	if regional {
+		region = "regional"
+	} else {
+		region = "global"
+	}
+
 	for ; true; <-g {
 		log.Println("Azure: Collecting Prices")
 		totalCosts := []*Costs{}
 		tokenTypes := []string{"Input", "Output"}
 		models := d.LookupModels()
-		cleanModel := regexp.MustCompile(`-[0-9]{4}-[0-9]{2}-[0-9]{2}`)
 		if len(models) == 0 {
 			log.Println("No Models in DB yet, no costs can be calculated")
 			return
 		}
+		// Because Microsoft cannot decide to either use a space or a dash we have to handle both :)
+		microsoftSpecialSeperator := []string{"-", " "}
 
 		for _, model := range models {
-			modelName := cleanModel.ReplaceAllString(model, "")
-			for _, tokenType := range tokenTypes {
-				c := GetCosts(modelName, tokenType)
-				c.TokenType = tokenType
-				c.ModelName = modelName
-				totalCosts = append(totalCosts, c)
+			modelSplit := strings.Split(model, "-")
+			for _, sep := range microsoftSpecialSeperator {
+				for _, tokenType := range tokenTypes {
+					skuName := fmt.Sprintf("%s-%s-%s%s-%s-%s", modelSplit[0], modelSplit[1], modelSplit[3], modelSplit[4], tokenType, region)
+					if sep != "-" {
+						skuName = strings.ReplaceAll(skuName, "-", sep)
+					}
+					c := GetCosts(skuName, tokenType)
+					if c.SKUName != "" {
+						c.TokenType = tokenType
+						c.IsRegional = regional
+						c.ModelName = model
+						totalCosts = append(totalCosts, c)
+					}
+				}
 			}
 		}
 		dbcosts := []*db.Costs{}
@@ -69,27 +87,19 @@ func GetAllCosts(d *db.Database, g <-chan time.Time) {
 	}
 }
 
-func GetCosts(modelName string, tokenType string) *Costs {
+func GetCosts(skuName string, tokenType string) *Costs {
 	currency := "EUR"
 	regionName := "swedencentral"
 	productName := "Azure OpenAI"
-	regional := true
-	errorContext := fmt.Sprintf("Check ENV - regional: %s, regionName: %s, currency: %s", regional, regionName, currency)
 
-	var region string
-
-	if regional {
-		region = "regional"
-	} else {
-		region = "global"
-	}
+	errorContext := fmt.Sprintf("Check ENV - regionName: %s, currency: %s", regionName, currency)
 
 	rq, err := http.NewRequest("GET", "https://prices.azure.com/api/retail/prices", nil)
 	if err != nil {
 		log.Println("Could not get latest Prices from API", errorContext)
 	}
 
-	filter := fmt.Sprintf("productName eq '%s' and armRegionName eq '%s' and skuName eq '%s-%s-%s'", productName, regionName, modelName, tokenType, region)
+	filter := fmt.Sprintf("productName eq '%s' and armRegionName eq '%s' and skuName eq '%s'", productName, regionName, skuName)
 	q := rq.URL.Query()
 	q.Add("currencyCode", currency)
 	q.Add("$filter", filter)
@@ -110,8 +120,10 @@ func GetCosts(modelName string, tokenType string) *Costs {
 
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	json.Unmarshal(body, &base)
+	if len(base.Costs) == 0 {
+		return &Costs{}
+	}
 	c := &base.Costs[0]
-	c.IsRegional = regional
 	c.Currency = currency
 	return c
 }
