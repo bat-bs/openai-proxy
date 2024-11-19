@@ -15,6 +15,26 @@ import (
 	"github.com/go-echarts/go-echarts/v2/opts"
 )
 
+type GraphHandler struct {
+	a     *ApiHandler
+	cache []Cache
+}
+
+// if basecount, filter and DB Rows missmatch, Cache will be updated
+type Cache struct {
+	ID        string
+	BaseCount int //
+	Filter    string
+	Data      []db.RequestSummary
+}
+
+func NewGraphHandler(a *ApiHandler) *GraphHandler {
+	var cache []Cache
+	return &GraphHandler{a, cache}
+}
+
+// Generate Token Graphs for API Key and Admin overview and allow to filter by timeframes
+
 type Graph struct {
 	key  string
 	kind string // can be "user" or "apiKey"
@@ -22,14 +42,14 @@ type Graph struct {
 	r    *http.Request
 }
 
-func (a *ApiHandler) GetTableGraph(w http.ResponseWriter, r *http.Request) {
-	ok := a.auth.ValidateSessionToken(w, r)
+func (g *GraphHandler) GetTableGraph(w http.ResponseWriter, r *http.Request) {
+	ok := g.a.auth.ValidateSessionToken(w, r)
 	if !ok {
 		http.Error(w, "Not Authorized", http.StatusForbidden)
 		return
 	}
 	key := strings.TrimPrefix(r.URL.Path, "/api2/table/graph/get/")
-	a.RenderGraph(&Graph{
+	g.RenderGraph(&Graph{
 		key:  key,
 		kind: "apiKey",
 		w:    w,
@@ -38,16 +58,16 @@ func (a *ApiHandler) GetTableGraph(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) {
+func (g *GraphHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) {
 
-	ok, err := a.auth.ValidateAdminSession(w, r)
+	ok, err := g.a.auth.ValidateAdminSession(w, r)
 	if err != nil || !ok {
 		http.Error(w, "Not Authorized", http.StatusForbidden)
 		return
 	}
 
 	key := strings.TrimPrefix(r.URL.Path, "/api2/admin/table/graph/get/")
-	a.RenderGraph(&Graph{
+	g.RenderGraph(&Graph{
 		key:  key,
 		kind: "user",
 		w:    w,
@@ -56,10 +76,10 @@ func (a *ApiHandler) GetAdminTableGraph(w http.ResponseWriter, r *http.Request) 
 
 }
 
-func (a *ApiHandler) RenderGraph(g *Graph) {
+func (g *GraphHandler) RenderGraph(gr *Graph) {
 
 	selectedfilter := "24h" // default Value
-	header := g.r.Header.Get("HX-Current-URL")
+	header := gr.r.Header.Get("HX-Current-URL")
 	currentURL, err := url.Parse(header)
 	if err != nil {
 		log.Println("Error Parsing HX-Current-URL for Graph Table")
@@ -90,13 +110,6 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 		filter = "This Year"
 	}
 
-	data, err := a.db.LookupApiKeyUserStats(g.key, g.kind, filter)
-	if err != nil {
-		log.Println(err)
-		http.Error(g.w, "Could not get Data from DB for User "+string(g.key), 500)
-		return
-	}
-
 	// create a new line instance
 	line := charts.NewLine()
 	// set some global options like Title/Legend/ToolTip or anything else
@@ -108,9 +121,10 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 		charts.WithYAxisOpts(opts.YAxis{SplitNumber: 2}),
 		// charts.WithVisualMapOpts(opts.VisualMap{Show: opts.Bool(false)})
 	)
+	data := g.GetTableGraphData(gr, filter)
 
 	// Put data into instance
-	td, err := a.GetAdminTableGraphData(g.w, data, filter)
+	td, err := g.SetTableGraphData(gr.w, data, filter)
 	if err != nil {
 		return
 	}
@@ -141,7 +155,7 @@ func (a *ApiHandler) RenderGraph(g *Graph) {
 		Filter:     filter,
 	}
 	// var buf bytes.Buffer
-	if err := t.Execute(g.w, snippetData); err != nil {
+	if err := t.Execute(gr.w, snippetData); err != nil {
 		log.Println("Error Templating Chart", err)
 		return
 	}
@@ -157,7 +171,46 @@ type TableData struct {
 	totalCount int
 }
 
-func (a *ApiHandler) GetAdminTableGraphData(w http.ResponseWriter, d []db.RequestSummary, filter string) (*TableData, error) {
+func (g *GraphHandler) GetTableGraphData(gr *Graph, filter string) []db.RequestSummary {
+	for _, row := range g.cache {
+		if row.ID == gr.key && row.Filter == filter {
+			count, err := g.a.db.LookupApiKeyUserStatsRows(gr.key, gr.kind)
+			if err == nil && count == row.BaseCount {
+				return row.Data
+			}
+			if err != nil {
+				log.Println(err)
+			}
+			row.Data = g.LookupTableGraphData(gr, filter)
+			row.BaseCount = count
+		}
+	}
+	rowCount, err := g.a.db.LookupApiKeyUserStatsRows(gr.key, gr.kind)
+	if err != nil {
+		log.Println("could not count rows for caching: ", err)
+	}
+
+	row := Cache{
+		Data:      g.LookupTableGraphData(gr, filter),
+		BaseCount: rowCount,
+		Filter:    filter,
+		ID:        gr.key,
+	}
+	g.cache = append(g.cache, row)
+	return row.Data
+}
+
+func (g *GraphHandler) LookupTableGraphData(gr *Graph, filter string) []db.RequestSummary {
+	data, err := g.a.db.LookupApiKeyUserStats(gr.key, gr.kind, filter)
+	if err != nil && data != nil {
+		log.Println(err)
+		http.Error(gr.w, "Could not get Data from DB for User "+string(gr.key), 500)
+		return nil
+	}
+	return data
+}
+
+func (g *GraphHandler) SetTableGraphData(w http.ResponseWriter, d []db.RequestSummary, filter string) (*TableData, error) {
 
 	td := &TableData{
 		data:     make([]opts.LineData, 0),
@@ -188,7 +241,7 @@ func (a *ApiHandler) GetAdminTableGraphData(w http.ResponseWriter, d []db.Reques
 		totalTokens = item.TokenCountComplete + item.TokenCountPrompt
 		td.data = append(td.data, opts.LineData{Value: totalTokens})
 		td.totalCount = td.totalCount + totalTokens
-		loc, err := time.LoadLocation(a.timeZone)
+		loc, err := time.LoadLocation(g.a.timeZone)
 		if err != nil {
 			log.Println("Error Displaying Timezone, maybe the TIMEZONE env is wrongly set")
 			td.timeAxis = append(td.timeAxis, item.RequestTime.Format(format))

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -93,55 +94,6 @@ func (d *Database) LookupDatabasePath() string {
 	}
 }
 
-type User struct {
-	Name    string
-	Sub     string
-	IsAdmin bool
-}
-
-func (d *Database) GetUser(uid string) (*User, error) {
-	var sub string
-	var name sql.NullString
-	var isadmin sql.NullBool
-	err := d.db.QueryRow("SELECT id,name,is_admin FROM users WHERE id = $1", uid).Scan(&sub, &name, &isadmin)
-	if err != nil {
-		return nil, err
-	}
-	return &User{
-		Name:    name.String,
-		Sub:     sub,
-		IsAdmin: isadmin.Bool,
-	}, nil
-
-}
-
-func (d *Database) WriteUser(userClaim *User) (err error) {
-
-	userDB, err1 := d.GetUser(userClaim.Sub)
-	if err1 == sql.ErrNoRows {
-		_, err := d.db.Exec("INSERT INTO users (id,name,is_admin) VALUES ($1, $2, $3)", userClaim.Sub, userClaim.Name, userClaim.IsAdmin)
-		if err != nil {
-			log.Printf("User Insert Failed: %v", err)
-			return err
-		}
-		return nil
-	} else if err1 != nil {
-		log.Println("Error reading User in DB: ", err1)
-		return err1
-	} else if userClaim.Name != userDB.Name {
-		_, err := d.db.Exec("UPDATE users SET name=$1 WHERE id=$2", userClaim.Name, userClaim.Sub)
-		if err != nil {
-			log.Printf("User updating Failed: %v", err)
-		}
-	} else if userClaim.IsAdmin != userDB.IsAdmin {
-		_, err := d.db.Exec("UPDATE users SET is_admin=$1 WHERE id=$2", userClaim.IsAdmin, userClaim.Sub)
-		if err != nil {
-			log.Printf("User updating Failed: %v", err)
-		}
-	}
-	return nil
-}
-
 func (d *Database) WriteEntry(a *ApiKey) error {
 	_, err := d.db.Exec("INSERT INTO apiKeys VALUES ($1, $2, $3, $4, $5)", a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description)
 	if err != nil {
@@ -196,12 +148,94 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	return apikeys, nil
 }
 
+type Costs struct {
+	ModelName     string
+	RetailPrice   int64
+	TokenType     string
+	UnitOfMeasure string
+	IsRegional    bool
+	BackendName   string // currently only azure
+	Currency      string
+	Day           time.Time
+}
+
+func (d *Database) WriteCosts(carray []*Costs) error {
+	for _, c := range carray {
+		_, err := d.db.Exec(`
+		INSERT INTO costs
+		  (model,price,token_type,unit_of_messure,is_regional,backend_name,currency)
+		VALUES
+		  ($1, $2, $3, $4, $5, $6, $7)`, c.ModelName, c.RetailPrice, c.TokenType, c.UnitOfMeasure, c.IsRegional, c.BackendName, c.Currency)
+		if !strings.Contains(fmt.Sprintf("%s", err), "SQLSTATE 23505") {
+			log.Println(err)
+		}
+		if err == nil {
+			log.Printf("%s-costs: Wrote %s-Costs (%v) for Model %s to db. Unit: %s", c.BackendName, c.TokenType, c.RetailPrice, c.ModelName, c.UnitOfMeasure)
+		}
+	}
+	log.Println("Azure: Collecting Prices Done!")
+	return nil
+}
+
+func (d *Database) LookupModels() []string {
+	var models []string
+	rows, err := d.db.Query(`select model from requests group by model`)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
+	var model string
+	for rows.Next() {
+		if err := rows.Scan(&model); err != nil {
+			return models
+		}
+		if model == "" {
+			continue
+		}
+		models = append(models, model)
+	}
+	return models
+}
+
 type RequestSummary struct {
 	ID                 string
 	Name               string
 	RequestTime        time.Time
 	TokenCountPrompt   int
 	TokenCountComplete int
+}
+
+func (d *Database) LookupCosts() ([]Costs, error) {
+	costs, err := d.db.Query("select * from Costs")
+	costsRow := Costs{}
+	costsTable := []Costs{}
+	if err == nil {
+		for costs.Next() {
+			err := costs.Scan(&costsRow.ModelName, &costsRow.RetailPrice, &costsRow.Day, &costsRow.UnitOfMeasure, &costsRow.IsRegional, &costsRow.BackendName, &costsRow.Currency)
+			if err != nil {
+				return costsTable, err
+			}
+			costsTable = append(costsTable, costsRow)
+		}
+	}
+	return costsTable, nil
+}
+
+// used to check if cache has to be updated
+func (d *Database) LookupApiKeyUserStatsRows(uid string, kind string) (int, error) {
+	// handle "user" view for admintable and "apiKey" view for usertable
+	if kind == "user" {
+		kind = "u.id"
+	} else {
+		kind = "a.UUID"
+	}
+
+	query := fmt.Sprintf("SELECT count(*) FROM requests r INNER JOIN apikeys a ON a.UUID = r.api_key_id INNER JOIN users u on a.Owner = u.id WHERE %s = '%s'", kind, uid)
+	val := d.db.QueryRow(query)
+	var rowcount *int
+	val.Scan(&rowcount)
+	return *rowcount, nil
+
 }
 
 func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string) ([]RequestSummary, error) {
@@ -227,15 +261,17 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string)
 			r.request_time >= date_trunc('month', current_timestamp) - interval '1 month'
 			AND r.request_time < date_trunc('month', current_timestamp)`
 	case "This Year":
-		dateTrunc = "month"
+		dateTrunc = "day"
 		condition = `
 			r.request_time >= date_trunc('year', current_timestamp)
 			AND r.request_time < date_trunc('year', current_timestamp) + interval '1 year'`
 	case "Last Year":
-		dateTrunc = "month"
+		dateTrunc = "day"
 		condition = `
 			r.request_time >= date_trunc('year', current_timestamp) - interval '1 year'
 			AND r.request_time < date_trunc('year', current_timestamp)`
+	default:
+		log.Println("Filter did not match", filter)
 	}
 
 	// handle "user" view for admintable and "apiKey" view for usertable
