@@ -7,6 +7,14 @@
     return urlParams.get(name);
   }
 
+  function setURL(param, val) {
+    
+    url = new URL(window.location.href)
+    console.log(url)
+    url.searchParams.set(param, val)
+    window.location.href = url.href
+  }
+
   // Get the current filter value from query parameters
   const filter = getQueryParameter('filter');
 
@@ -21,47 +29,81 @@
       selectedButton.classList.remove('bg-blue-300'); // Remove the default class
     }
   }
+
+
+
+  // Get the current filter unit from query parameters
+  const unit = getQueryParameter('unit');
+
+  // Highlight the button matching the filter value
+  if (unit) {
+    const selectedButton = document.getElementById('btn-' + unit);
+    if (selectedButton) {
+      selectedButton.classList.add('bg-blue-500'); // Add class to highlight
+      selectedButton.classList.remove('bg-blue-300'); // Remove the default class
+    }
+  }
 </script>
 
 <div class="flex max-w-screen justify-end mb-2">
+<div class="flex bg-slate-800 justify-end rounded-l">
+<a onclick="setURL('unit', 'tokens');">
+  <button  id="btn-tokens" class="bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-1 px-3 rounded-l">
+      Tokens
+  </button>
+</a>
+
+</div>
+<div class="flex bg-slate-800 justify-end rounded-r">
+<a onclick="setURL('unit', 'EUR');">
+  <button  id="btn-EUR" class="bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-1 px-3 rounded-r">
+      €
+  </button>
+</a>
+</div>
+</div>
+
+<div class="flex max-w-screen justify-end mb-2">
 <div class="flex bg-slate-800 justify-end rounded">
-  <a href="?filter=24h">
+  <a  onclick="setURL('filter', '24h');">
     <button id="btn-24h" class="bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-1 px-3 rounded-l">
         24 Hours
     </button>
   </a>
-  <a href="?filter=7d">
+  <a onclick="setURL('filter', '7d');" >
   <button id="btn-7d" class="justify-end bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-1 px-3 ">
     7 Days
   </button>
   </a>
-  <a href="?filter=30d">
+  <a onclick="setURL('filter', '30d');">
   <button id="btn-30d" class="justify-end bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-1 px-3 mr-2 ">
     30 Days
   </button>
   </a>
-  <a href="?filter=this-month">
+  <a onclick="setURL('filter', 'this-month');">
     <button id="btn-this-month" class="bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-1 px-3 ">
         This Month
     </button>
   </a>
-  <a href="?filter=last-month">
+  <a onclick="setURL('filter', 'last-month');">
   <button id="btn-last-month" class="justify-end bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-1 px-3 mr-2 ">
     Last Month
   </button>
   </a>
-  <a href="?filter=this-year">
+  <a onclick="setURL('filter', 'this-year');">
     <button id="btn-this-year" class="bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-1 px-3 ">
         This Year
     </button>
   </a>
-  <a href="?filter=last-year">
+  <a onclick="setURL('filter', 'last-year');">
   <button id="btn-last-year" class="justify-end bg-blue-300 hover:bg-blue-400 text-gray-800 font-bold py-1 px-3 rounded-r">
     Last Year
   </button>
   </a>
 </div>
 </div>
+
+
 
 
 <table class="min-w-full divide-y dark:text-gray-200 divide-gray-200 shadow overflow-hidden rounded-lg">

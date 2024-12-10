@@ -72,7 +72,7 @@ func GetAllCosts(d *db.Database, g <-chan time.Time) {
 		for _, costs := range totalCosts {
 			dbc := &db.Costs{
 				ModelName:     costs.ModelName,
-				RetailPrice:   int64(costs.RetailPrice * float32(MoneyUnit)),
+				RetailPrice:   int(costs.RetailPrice * float32(MoneyUnit)),
 				TokenType:     costs.TokenType,
 				UnitOfMeasure: costs.UnitOfMeasure,
 				IsRegional:    costs.IsRegional,
@@ -99,7 +99,7 @@ func GetCosts(skuName string, tokenType string) *Costs {
 		log.Println("Could not get latest Prices from API", errorContext)
 	}
 
-	filter := fmt.Sprintf("productName eq '%s' and armRegionName eq '%s' and skuName eq '%s'", productName, regionName, skuName)
+	filter := fmt.Sprintf("productName eq '%s' and armRegionName eq '%s' and skuName eq '%s' ", productName, regionName, skuName)
 	q := rq.URL.Query()
 	q.Add("currencyCode", currency)
 	q.Add("$filter", filter)

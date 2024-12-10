@@ -150,13 +150,13 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 
 type Costs struct {
 	ModelName     string
-	RetailPrice   int64
+	RetailPrice   int
 	TokenType     string
 	UnitOfMeasure string
 	IsRegional    bool
 	BackendName   string // currently only azure
 	Currency      string
-	Day           time.Time
+	RequestTime   time.Time
 }
 
 func (d *Database) WriteCosts(carray []*Costs) error {
@@ -199,26 +199,30 @@ func (d *Database) LookupModels() []string {
 
 type RequestSummary struct {
 	ID                 string
+	Cost               float64
 	Name               string
+	Model              string
 	RequestTime        time.Time
+	IsEstimated        bool
 	TokenCountPrompt   int
 	TokenCountComplete int
 }
 
-func (d *Database) LookupCosts() ([]Costs, error) {
-	costs, err := d.db.Query("select * from Costs")
-	costsRow := Costs{}
-	costsTable := []Costs{}
-	if err == nil {
-		for costs.Next() {
-			err := costs.Scan(&costsRow.ModelName, &costsRow.RetailPrice, &costsRow.Day, &costsRow.UnitOfMeasure, &costsRow.IsRegional, &costsRow.BackendName, &costsRow.Currency)
-			if err != nil {
-				return costsTable, err
-			}
-			costsTable = append(costsTable, costsRow)
-		}
+func (d *Database) LookupCosts(model string) (carray []Costs) {
+	rows, err := d.db.Query("select * from costs where model = $1", model)
+	if err != nil {
+		return nil
 	}
-	return costsTable, nil
+
+	var c Costs
+	for rows.Next() {
+		if err := rows.Scan(&c.ModelName, &c.RetailPrice, &c.RequestTime, &c.TokenType, &c.UnitOfMeasure, &c.IsRegional, &c.BackendName, &c.Currency); err != nil {
+			log.Println("DB Error for looking up costs: ", err)
+			return carray
+		}
+		carray = append(carray, c)
+	}
+	return carray
 }
 
 // used to check if cache has to be updated
@@ -232,46 +236,58 @@ func (d *Database) LookupApiKeyUserStatsRows(uid string, kind string) (int, erro
 
 	query := fmt.Sprintf("SELECT count(*) FROM requests r INNER JOIN apikeys a ON a.UUID = r.api_key_id INNER JOIN users u on a.Owner = u.id WHERE %s = '%s'", kind, uid)
 	val := d.db.QueryRow(query)
+
 	var rowcount *int
 	val.Scan(&rowcount)
 	return *rowcount, nil
 
 }
 
-func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string) ([]RequestSummary, error) {
-	var dateTrunc string
+func GetFilterTruncMap() map[string]string {
+	// Define FilterTrunc as Map, as its re-used in api/graph
+	return map[string]string{
+		"24 Hours":   "hour",
+		"30 days":    "day",
+		"This Month": "day",
+		"Last Month": "day",
+		"This Year":  "month",
+		"Last Year":  "month",
+	}
+}
+
+func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string, overwriteDateTrunc bool) ([]RequestSummary, error) {
 
 	// build sql condition based on filter
 	var condition string
 	switch filter {
 	case "24 Hours":
 		condition = "r.request_time >= NOW() - INTERVAL '1 day'"
-		dateTrunc = "hour"
 	case "30 days", "7 days":
 		condition = "r.request_time >= NOW() - INTERVAL '1 month'"
-		dateTrunc = "day"
 	case "This Month":
-		dateTrunc = "day"
 		condition = `
 			r.request_time >= date_trunc('month', current_timestamp)
 			AND r.request_time < date_trunc('month', current_timestamp) + interval '1 month'`
 	case "Last Month":
-		dateTrunc = "day"
 		condition = `
 			r.request_time >= date_trunc('month', current_timestamp) - interval '1 month'
 			AND r.request_time < date_trunc('month', current_timestamp)`
 	case "This Year":
-		dateTrunc = "day"
 		condition = `
 			r.request_time >= date_trunc('year', current_timestamp)
 			AND r.request_time < date_trunc('year', current_timestamp) + interval '1 year'`
 	case "Last Year":
-		dateTrunc = "day"
 		condition = `
 			r.request_time >= date_trunc('year', current_timestamp) - interval '1 year'
 			AND r.request_time < date_trunc('year', current_timestamp)`
 	default:
 		log.Println("Filter did not match", filter)
+	}
+
+	// Overwrite Date Trunc if Money as a unit is selected, to calculate costs based of the model costs of the day
+	dateTrunc := GetFilterTruncMap()[filter]
+	if overwriteDateTrunc && dateTrunc != "hour" {
+		dateTrunc = "day"
 	}
 
 	// handle "user" view for admintable and "apiKey" view for usertable
@@ -284,6 +300,7 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string)
 	query := fmt.Sprintf(`
 		SELECT
 			%[1]s,
+			r.model,
 			SUM(r.token_count_prompt),
 			SUM(r.token_count_complete),
 			date_trunc('%[2]s', r.request_time) AS rq_time
@@ -293,7 +310,7 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string)
 		WHERE 
 			%[1]s = $1
 			AND %[3]s
-		GROUP BY %[1]s, rq_time
+		GROUP BY %[1]s, r.model, rq_time
 		ORDER BY rq_time;`,
 		kind, dateTrunc, condition)
 	rows, err := d.db.Query(query, uid)
@@ -303,7 +320,7 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string)
 	var summary []RequestSummary
 	for rows.Next() {
 		var rq RequestSummary
-		if err := rows.Scan(&rq.ID, &rq.TokenCountPrompt, &rq.TokenCountComplete, &rq.RequestTime); err != nil {
+		if err := rows.Scan(&rq.ID, &rq.Model, &rq.TokenCountPrompt, &rq.TokenCountComplete, &rq.RequestTime); err != nil {
 			return summary, err
 		}
 		summary = append(summary, rq)
