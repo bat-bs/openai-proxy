@@ -33,15 +33,15 @@ func GetAllCosts(d *db.Database, g <-chan time.Time) {
 	regional := true
 	var region string
 	if regional {
-		region = "regional"
+		region = "regnl"
 	} else {
-		region = "global"
+		region = "glbl"
 	}
 
 	for ; true; <-g {
 		log.Println("Azure: Collecting Prices")
 		totalCosts := []*Costs{}
-		tokenTypes := []string{"Input", "Output"}
+		tokenTypes := []string{"Inp", "Outp"}
 		models := d.LookupModels()
 		if len(models) == 0 {
 			log.Println("No Models in DB yet, no costs can be calculated")
