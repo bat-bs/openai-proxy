@@ -402,10 +402,10 @@ func (g *GraphHandler) getCostData(dbs db.RequestSummary) (totalCosts int, estim
 				costDay := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 
 				if costDay == requestDay && c.UnitOfMeasure == "1K" {
-					if c.TokenType == "Output" {
+					if c.TokenType == "Outp" {
 						out = dbs.TokenCountComplete * c.RetailPrice / 1000
 					}
-					if c.TokenType == "Input" {
+					if c.TokenType == "Inp" {
 						in = dbs.TokenCountComplete * c.RetailPrice / 1000
 					}
 
