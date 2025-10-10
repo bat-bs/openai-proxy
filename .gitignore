@@ -1,3 +1,7 @@
 .env
 apiproxy.sqlite
 apgiproxy.sqlite
+vendor/
+
+.pre-commit-config.yaml
+.direnv
