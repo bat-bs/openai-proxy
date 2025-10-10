@@ -76,10 +76,6 @@ func (r *Response) ReadValues() error {
 
 func (r *Response) ProcessValues() {
 	c := r.content
-	// Assign "chat.completion" to c.Object if it is empty or unset
-	if c.Object == "" {
-		c.Object = "chat.completion"
-	}
 	if c.Object != "chat.completion" {
 		log.Printf("Untested API Endpoint '%s' is used, check the Request in the DB: %s", c.Object, c.ID)
 	}
