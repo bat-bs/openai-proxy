@@ -12,19 +12,13 @@
       pre-commit-check = inputs.pre-commit-hooks.lib.${system}.run {
         src = ./.;
         hooks = {
-          alejandra.enable = true; # HCL/JSON formatting for the flake
-          # gofuzz = {
-          #   enable = true;
-          #   name = "Gofmt and Goimports check";
-          #   entry = "${pkgs.go}/bin/gofmt -l . && ${pkgs.gotools}/bin/goimports -l .";
-          #   # pass_filenames = false;
-          # };
+          alejandra.enable = true;
           gofmt = {
             enable = true;
             name = "Gofmt check";
             entry = "${pkgs.go}/bin/gofmt -l";
             pass_filenames = true;
-            files = "\\.go$"; # only .go files are considered
+            files = "\\.go$";
           };
           goimports = {
             enable = true;

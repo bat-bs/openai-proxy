@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openai_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-openai_proxy}
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "8082:8082"
+    env_file:
+      - ./app.env
+    environment:
+      # Ensure the app connects to the compose db service
+      DATABASE_HOST: db
+      DATABASE_USERNAME: ${POSTGRES_USER:-openai}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-openai_pass}
+      DATABASE_NAME: ${POSTGRES_DB:-openai_proxy}
+      # Provide a full connection string for tools that prefer it.
+      DATABASE_PATH: "postgresql://${POSTGRES_USER:-openai}:${POSTGRES_PASSWORD:-openai_pass}@db/${POSTGRES_DB:-openai_proxy}?sslmode=disable"
+    volumes:
+      # Keep DB migrations and editable DB schema available to the container
+      - ../db:/app/db:ro
+      # Expose the public static files so you can edit them locally
+      - ../public:/app/public:rw
