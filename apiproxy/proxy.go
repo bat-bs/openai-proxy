@@ -69,9 +69,7 @@ type baseHandle struct {
 func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := r.Header.Get("Backend")
 	r.Header.Del("Backend")
-	log.Println(r.Header.Get("Content-Type"))
-
-    w.Header().Set("Content-Type", "application/json")
+    log.Println(r.Header.Get("Content-Type"))
 
 	if fn, ok := backendProxy[backend]; ok {
 		fn.ServeHTTP(w, r)
