@@ -138,9 +138,27 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 		return
 	}
 
-	log.Printf("Received Request for Backend %s for remoteURL %s", backend, remoteUrl)
-	proxy := httputil.NewSingleHostReverseProxy(remoteUrl)
-	r.Host = remoteUrl.Host
+    log.Printf("Received Request for Backend %s for remoteURL %s", backend, remoteUrl)
+    proxy := httputil.NewSingleHostReverseProxy(remoteUrl)
+    r.Host = remoteUrl.Host
+    // Remove proxy/ingress headers that should not be forwarded to Azure.
+    // These headers are added by our ingress and clients and may be rejected
+    // or cause unexpected behavior when sent to the Azure OpenAI endpoint.
+    for _, hdr := range []string{
+        "X-Forwarded-For",
+        "X-Forwarded-Host",
+        "X-Forwarded-Port",
+        "X-Forwarded-Proto",
+        "X-Forwarded-Scheme",
+        "X-Real-Ip",
+        "X-Request-Id",
+        "X-Scheme",
+        "Forwarded",
+        "Via",
+        "Client-Ip",
+    } {
+        r.Header.Del(hdr)
+    }
     // Normalize incoming path for Azure deployment endpoints.
     // Incoming v1 requests under `/api/v1/...` should be forwarded to
     // `/openai/deployments/{deployment}/...` on Azure. We remove `/api` and
