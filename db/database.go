@@ -55,9 +55,7 @@ func NewDB() *Database {
 
 }
 
-// func (d *Database) CheckAndCreateUser(sub string) string {
-
-// }
+ 
 
 func (d *Database) Close() {
 	d.db.Close()

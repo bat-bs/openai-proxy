@@ -220,21 +220,21 @@ func (a *Auth) ValidateAdminSession(w http.ResponseWriter, r *http.Request) (boo
 }
 
 func (a *Auth) ValidateSessionToken(w http.ResponseWriter, r *http.Request) bool {
-    // Parse and verify ID Token payload.
-    rawIDToken, err := r.Cookie("session_token")
-    if err != nil || rawIDToken == nil {
-        // No cookie present or failed to read it.
-        log.Printf("Session Token Missing: cookie error=%v path=%s ua=%s", err, r.URL.Path, r.Header.Get("User-Agent"))
-        return false
-    }
+	// Parse and verify ID Token payload.
+	rawIDToken, err := r.Cookie("session_token")
+	if err != nil || rawIDToken == nil {
+		// No cookie present or failed to read it.
+		log.Printf("Session Token Missing: cookie error=%v path=%s ua=%s", err, r.URL.Path, r.Header.Get("User-Agent"))
+		return false
+	}
 
-    _, err = a.verifier.Verify(a.ctx, rawIDToken.Value)
-    if err != nil {
-        // Log the verification error with some non-sensitive request context to help debugging.
-        log.Printf("Session Token Wrong: verify error=%v path=%s ua=%s", err, r.URL.Path, r.Header.Get("User-Agent"))
-        http.Redirect(w, r, "/login/", http.StatusTemporaryRedirect)
-        return false
-    }
+	_, err = a.verifier.Verify(a.ctx, rawIDToken.Value)
+	if err != nil {
+		// Log the verification error with some non-sensitive request context to help debugging.
+		log.Printf("Session Token Wrong: verify error=%v path=%s ua=%s", err, r.URL.Path, r.Header.Get("User-Agent"))
+		http.Redirect(w, r, "/login/", http.StatusTemporaryRedirect)
+		return false
+	}
 
 	return true
 }

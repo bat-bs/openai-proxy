@@ -188,15 +188,10 @@ func (g *GraphHandler) RenderGraph(gr *Graph) {
 		Estimated:  td.isEstimated,
 		Unit:       getUnits()[gr.unit],
 	}
-	// var buf bytes.Buffer
-	if err := t.Execute(gr.w, snippetData); err != nil {
-		log.Println("Error Templating Chart", err)
-		return
-	}
-
-	// line.RenderSnippet()
-	// log.Println(buf.String())
-
+        if err := t.Execute(gr.w, snippetData); err != nil {
+                log.Println("Error Templating Chart", err)
+                return
+        }
 }
 
 // This handles the request and the formatting of the data
@@ -383,7 +378,16 @@ func (g *GraphHandler) SetTableGraphData(gr *Graph, d []db.RequestSummary) (*Tab
 }
 
 func (g *GraphHandler) getCostData(dbs db.RequestSummary) (totalCosts int, estimated bool) {
+	// Delegate to helper so tests can invoke the same logic without DB access.
 	costs := g.a.db.LookupCosts(dbs.Model)
+	return computeCosts(costs, dbs)
+}
+
+// computeCosts computes the total cost (in smallest money unit) for a request
+// given a list of recorded costs. This mirrors the logic that was previously
+// embedded in getCostData and is kept here so unit tests can exercise it
+// without needing a database.
+func computeCosts(costs []db.Costs, dbs db.RequestSummary) (totalCosts int, estimated bool) {
 	log.Println(costs, dbs.Model)
 	var in, out int
 
@@ -396,7 +400,6 @@ func (g *GraphHandler) getCostData(dbs db.RequestSummary) (totalCosts int, estim
 	for dayToNextEntry < 10 {
 		for _, daybetween := range []int{dayToNextEntry, dayToNextEntry * -1} {
 			for _, c := range costs {
-
 				y, m, d := c.RequestTime.Date()
 				d = d + daybetween
 				costDay := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
@@ -406,9 +409,9 @@ func (g *GraphHandler) getCostData(dbs db.RequestSummary) (totalCosts int, estim
 						out = dbs.TokenCountComplete * c.RetailPrice / 1000
 					}
 					if c.TokenType == "Inp" {
-						in = dbs.TokenCountComplete * c.RetailPrice / 1000
+						// Input costs must be calculated from the prompt token count.
+						in = dbs.TokenCountPrompt * c.RetailPrice / 1000
 					}
-
 				}
 			}
 			log.Println("Before Condition db: ", daybetween, " out:", out)
