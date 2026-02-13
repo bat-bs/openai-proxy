@@ -43,6 +43,11 @@
     <p>Loading...</p>
 </div>
 
+<!-- HTMX endpoint call for models management -->
+<div id="models-table-container" class="z-5 mt-8" hx-get="/api2/admin/models/get" hx-swap="innerHTML" hx-trigger="load">
+    <p>Loading models...</p>
+</div>
+
 <!-- Table container for HTMX response -->
 <div >
 </div>

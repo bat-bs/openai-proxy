@@ -55,8 +55,6 @@ func NewDB() *Database {
 
 }
 
- 
-
 func (d *Database) Close() {
 	d.db.Close()
 }
@@ -193,6 +191,34 @@ func (d *Database) LookupModels() []string {
 		models = append(models, model)
 	}
 	return models
+}
+
+func (d *Database) ListConfiguredModels() ([]string, error) {
+	var models []string
+	rows, err := d.db.Query(`SELECT id FROM models ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		models = append(models, id)
+	}
+	return models, nil
+}
+
+func (d *Database) AddConfiguredModel(id string) error {
+	_, err := d.db.Exec(`INSERT INTO models (id) VALUES ($1) ON CONFLICT DO NOTHING`, id)
+	return err
+}
+
+func (d *Database) DeleteConfiguredModel(id string) error {
+	_, err := d.db.Exec(`DELETE FROM models WHERE id = $1`, id)
+	return err
 }
 
 type RequestSummary struct {
