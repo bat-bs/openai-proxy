@@ -27,6 +27,9 @@ func ApiInit(mux *http.ServeMux, a *auth.Auth, db *db.Database) {
 	mux.HandleFunc("/api2/table/get", api.GetTable)
 	mux.HandleFunc("/api2/table/entry/save", api.CreateEntry)
 	mux.HandleFunc("/api2/table/entry/delete/", api.DeleteEntry)
+	mux.HandleFunc("/api2/admin/models/get", api.GetModelsTable)
+	mux.HandleFunc("/api2/admin/models/add", api.AddModel)
+	mux.HandleFunc("/api2/admin/models/delete/", api.DeleteModel)
 
 }
 

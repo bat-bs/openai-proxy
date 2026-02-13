@@ -1,16 +1,16 @@
 package apiproxy
 
 import (
-    "bytes"
-    "fmt"
-    "io"
-    "log"
-    "net/http"
-    "net/http/httputil"
-    "net/url"
-    db "openai-api-proxy/db"
-    "os"
-    "strings"
+	"bytes"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	db "openai-api-proxy/db"
+	"os"
+	"strings"
 )
 
 type AzureConfig struct {
@@ -21,8 +21,8 @@ type AzureConfig struct {
 }
 
 var (
-    authHeader = "Authorization"
-    defaultBackend = "openai"
+	authHeader     = "Authorization"
+	defaultBackend = "openai"
 )
 
 // hostTarget maps hostnames to their corresponding backend server URLs.
@@ -65,6 +65,12 @@ func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := r.Header.Get("Backend")
 	r.Header.Del("Backend")
 	log.Println(r.Header.Get("Content-Type"))
+
+	// Intercept OpenAI-compatible models endpoints and serve locally
+	if strings.HasPrefix(r.URL.Path, "/api/models") || strings.HasPrefix(r.URL.Path, "/api/v1/models") {
+		h.handleModels(w, r)
+		return
+	}
 
 	if fn, ok := backendProxy[backend]; ok {
 		fn.ServeHTTP(w, r)

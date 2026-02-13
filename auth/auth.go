@@ -209,6 +209,22 @@ func (a *Auth) ValidateAdminSession(w http.ResponseWriter, r *http.Request) (boo
 		return false, err
 	}
 
+	// Sync admin status from claims to DB
+	isAdmin := false
+	for _, role := range claims.Roles {
+		if role == "admin" {
+			isAdmin = true
+			break
+		}
+	}
+
+	u := &db.User{
+		Name:    claims.Name,
+		Sub:     claims.Sub,
+		IsAdmin: isAdmin,
+	}
+	a.db.WriteUser(u)
+
 	user, err := a.db.GetUser(claims.Sub)
 	if err != nil {
 		return false, err
