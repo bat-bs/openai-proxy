@@ -49,10 +49,7 @@ func (h *baseHandle) handleModels(w http.ResponseWriter, r *http.Request) {
 	models, err := h.db.ListConfiguredModels()
 	if err != nil {
 		log.Printf("Error fetching models from DB: %v", err)
-		models = configuredModels()
-	} else if len(models) == 0 {
-		// Fallback to environment variables if DB is empty
-		models = configuredModels()
+		models = []string{}
 	}
 
 	// Route: GET /models or /v1/models
@@ -114,47 +111,4 @@ func (h *baseHandle) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback shouldn't happen; let proxy handle.
-}
-
-// configuredModels returns the list of models configured via environment variables.
-// Priority:
-// 1) MODELS (comma-separated)
-// 2) RESSOURCE_NAME (single)
-// 3) AZURE_USE_MODEL (legacy; single)
-func configuredModels() []string {
-	if raw := os.Getenv("MODELS"); raw != "" {
-		res := splitAndClean(raw)
-		log.Printf("configuredModels: found %d models in MODELS: %v", len(res), res)
-		return res
-	}
-	if v := os.Getenv("RESSOURCE_NAME"); v != "" {
-		res := []string{strings.TrimSpace(v)}
-		log.Printf("configuredModels: found model in RESSOURCE_NAME: %v", res)
-		return res
-	}
-	if v := os.Getenv("AZURE_USE_MODEL"); v != "" {
-		res := []string{strings.TrimSpace(v)}
-		log.Printf("configuredModels: found model in AZURE_USE_MODEL: %v", res)
-		return res
-	}
-	log.Printf("configuredModels: no models found in environment")
-	return []string{}
-}
-
-func splitAndClean(s string) []string {
-	parts := strings.Split(s, ",")
-	res := make([]string, 0, len(parts))
-	seen := map[string]struct{}{}
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if _, ok := seen[p]; ok {
-			continue
-		}
-		seen[p] = struct{}{}
-		res = append(res, p)
-	}
-	return res
 }
