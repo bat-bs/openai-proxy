@@ -45,13 +45,17 @@ func GetAllCosts(d *db.Database, g <-chan time.Time) {
 		models := d.LookupModels()
 		if len(models) == 0 {
 			log.Println("No Models in DB yet, no costs can be calculated")
-			return
+			continue
 		}
 		// Because Microsoft cannot decide to either use a space or a dash we have to handle both :)
 		microsoftSpecialSeperator := []string{"-", " "}
 
 		for _, model := range models {
 			modelSplit := strings.Split(model, "-")
+			if len(modelSplit) < 5 {
+				log.Printf("skipping model %s (unexpected format)", model)
+				continue
+			}
 			for _, sep := range microsoftSpecialSeperator {
 				for _, tokenType := range tokenTypes {
 					skuName := fmt.Sprintf("%s-%s-%s%s-%s-%s", modelSplit[0], modelSplit[1], modelSplit[3], modelSplit[4], tokenType, region)

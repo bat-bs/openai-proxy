@@ -16,13 +16,17 @@ type Database struct {
 }
 
 type ApiKey struct {
-	UUID               string // ID that will be displayed in UI
-	ApiKey             string // Backend, not implemented yet
-	Owner              string // sub from oidc claims or name string on return
-	AiApi              string // can be openai or azure
-	Description        string // optional, user can describe his key
-	TokenCountPrompt   *int
-	TokenCountComplete *int
+	UUID                  string // ID that will be displayed in UI
+	ApiKey                string // Backend, not implemented yet
+	Owner                 string // sub from oidc claims or name string on return
+	AiApi                 string // can be openai or azure
+	Description           string // optional, user can describe his key
+	TokenCountPrompt      *int
+	TokenCountComplete    *int
+	InputTokenCount       int
+	CachedInputTokenCount int
+	OutputTokenCount      int
+	CacheRatioPercent     float64
 }
 
 func DatabaseInit() *Database {
@@ -110,22 +114,40 @@ func (d *Database) DeleteEntry(key *string, uid string) {
 }
 
 type Request struct {
-	ID                 string
-	ApiKeyID           string
-	TokenCountPrompt   int // Tokens of the Request (string) by the user
-	TokenCountComplete int // Tokens of the Response from the API
-	Model              string
+	ID                    string
+	ApiKeyID              string
+	TokenCountPrompt      int // Tokens of the Request (string) by the user
+	TokenCountComplete    int // Tokens of the Response from the API
+	InputTokenCount       int // Total input tokens (may include cached tokens)
+	CachedInputTokenCount int // Tokens already cached (subset of InputTokenCount)
+	OutputTokenCount      int // Output tokens (should match TokenCountComplete)
+	Model                 string
+	SnapshotVersion       string
 }
 
 func (d *Database) WriteRequest(r *Request) error {
-	_, err := d.db.Exec("INSERT INTO requests (id,api_key_id,token_count_prompt,token_count_complete,model) VALUES ($1,$2,$3,$4,$5)", r.ID, r.ApiKeyID, r.TokenCountPrompt, r.TokenCountComplete, r.Model)
+	_, err := d.db.Exec(`
+		INSERT INTO requests (
+			id, api_key_id,
+			input_token_count, cached_input_token_count, output_token_count,
+			model, snapshot_version
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		r.ID, r.ApiKeyID,
+		r.InputTokenCount, r.CachedInputTokenCount, r.OutputTokenCount,
+		r.Model, nullOrString(r.SnapshotVersion),
+	)
 	return err
 }
 
 func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
 	rows, err := d.db.Query(`
-		SELECT a.UUID,a.Owner,a.AiApi,a.Description,SUM(r.token_count_prompt),SUM(r.token_count_complete)
+		SELECT
+			a.UUID, a.Owner, a.AiApi, a.Description,
+			COALESCE(SUM(r.input_token_count), 0),
+			COALESCE(SUM(r.cached_input_token_count), 0),
+			COALESCE(SUM(r.output_token_count), 0)
 		FROM apiKeys a
 		LEFT JOIN requests r ON a.UUID = r.api_key_id
 		WHERE Owner=$1
@@ -136,8 +158,26 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 
 	for rows.Next() {
 		var a ApiKey
-		if err := rows.Scan(&a.UUID, &a.Owner, &a.AiApi, &a.Description, &a.TokenCountPrompt, &a.TokenCountComplete); err != nil {
+		var inputTotal, cachedTotal, outputTotal int
+		if err := rows.Scan(
+			&a.UUID, &a.Owner, &a.AiApi, &a.Description,
+			&inputTotal, &cachedTotal, &outputTotal,
+		); err != nil {
 			return apikeys, err
+		}
+		prompt := inputTotal - cachedTotal
+		if prompt < 0 {
+			prompt = 0
+		}
+		promptValue := prompt
+		a.TokenCountPrompt = &promptValue
+		a.InputTokenCount = inputTotal
+		a.CachedInputTokenCount = cachedTotal
+		a.OutputTokenCount = outputTotal
+		outValue := outputTotal
+		a.TokenCountComplete = &outValue
+		if inputTotal > 0 {
+			a.CacheRatioPercent = (float64(cachedTotal) / float64(inputTotal)) * 100
 		}
 		apikeys = append(apikeys, a)
 	}
@@ -222,14 +262,18 @@ func (d *Database) DeleteConfiguredModel(id string) error {
 }
 
 type RequestSummary struct {
-	ID                 string
-	Cost               float64
-	Name               string
-	Model              string
-	RequestTime        time.Time
-	IsEstimated        bool
-	TokenCountPrompt   int
-	TokenCountComplete int
+	ID                    string
+	Cost                  float64
+	Name                  string
+	Model                 string
+	RequestTime           time.Time
+	IsEstimated           bool
+	TokenCountPrompt      int
+	TokenCountComplete    int
+	InputTokenCount       int
+	CachedInputTokenCount int
+	OutputTokenCount      int
+	CacheRatioPercent     float64
 }
 
 func (d *Database) LookupCosts(model string) (carray []Costs) {
@@ -258,12 +302,12 @@ func (d *Database) LookupApiKeyUserStatsRows(uid string, kind string) (int, erro
 		kind = "a.UUID"
 	}
 
-	query := fmt.Sprintf("SELECT count(*) FROM requests r INNER JOIN apikeys a ON a.UUID = r.api_key_id INNER JOIN users u on a.Owner = u.id WHERE %s = '%s'", kind, uid)
-	val := d.db.QueryRow(query)
-
-	var rowcount *int
-	val.Scan(&rowcount)
-	return *rowcount, nil
+	query := fmt.Sprintf("SELECT count(*) FROM requests r INNER JOIN apikeys a ON a.UUID = r.api_key_id INNER JOIN users u on a.Owner = u.id WHERE %s = $1", kind)
+	var rowcount int
+	if err := d.db.QueryRow(query, uid).Scan(&rowcount); err != nil {
+		return 0, err
+	}
+	return rowcount, nil
 
 }
 
@@ -325,8 +369,8 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string,
 		SELECT
 			%[1]s,
 			r.model,
-			SUM(r.token_count_prompt),
-			SUM(r.token_count_complete),
+			COALESCE(SUM(r.input_token_count), 0) - COALESCE(SUM(r.cached_input_token_count), 0),
+			COALESCE(SUM(r.output_token_count), 0),
 			date_trunc('%[2]s', r.request_time) AS rq_time
 		FROM requests r
 		INNER JOIN apikeys a ON a.UUID = r.api_key_id 
@@ -357,8 +401,9 @@ func (d *Database) LookupApiKeyUserOverview() ([]RequestSummary, error) {
 			SELECT
 				u.name,
 				u.id,
-				SUM(r.token_count_prompt),
-				SUM(r.token_count_complete)
+				COALESCE(SUM(r.input_token_count), 0),
+				COALESCE(SUM(r.cached_input_token_count), 0),
+				COALESCE(SUM(r.output_token_count), 0)
 			FROM apiKeys a
 			LEFT JOIN users u on a.Owner = u.id 
 			LEFT JOIN requests r ON a.UUID = r.api_key_id
@@ -373,12 +418,33 @@ func (d *Database) LookupApiKeyUserOverview() ([]RequestSummary, error) {
 
 	for rows.Next() {
 		var rq RequestSummary
-		var tokenprompt, tokencomplete sql.NullInt64
-		if err := rows.Scan(&rq.Name, &rq.ID, &tokenprompt, &tokencomplete); err != nil {
+		var inputTotal, cachedTotal, outputTotal sql.NullInt64
+		if err := rows.Scan(&rq.Name, &rq.ID, &inputTotal, &cachedTotal, &outputTotal); err != nil {
 			return summary, err
 		}
-		rq.TokenCountPrompt = int(tokenprompt.Int64)
-		rq.TokenCountComplete = int(tokencomplete.Int64)
+		in := int(inputTotal.Int64)
+		cached := int(cachedTotal.Int64)
+		out := int(outputTotal.Int64)
+		if in < 0 {
+			in = 0
+		}
+		if cached < 0 {
+			cached = 0
+		}
+		if out < 0 {
+			out = 0
+		}
+		rq.InputTokenCount = in
+		rq.CachedInputTokenCount = cached
+		rq.OutputTokenCount = out
+		if in > 0 {
+			rq.CacheRatioPercent = (float64(cached) / float64(in)) * 100
+		}
+		rq.TokenCountPrompt = in - cached
+		if rq.TokenCountPrompt < 0 {
+			rq.TokenCountPrompt = 0
+		}
+		rq.TokenCountComplete = out
 		summary = append(summary, rq)
 	}
 	return summary, nil
@@ -407,4 +473,11 @@ func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 		apikeys = append(apikeys, a)
 	}
 	return apikeys, nil
+}
+
+func nullOrString(val string) interface{} {
+	if val == "" {
+		return nil
+	}
+	return val
 }
