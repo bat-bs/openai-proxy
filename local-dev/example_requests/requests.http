@@ -1,0 +1,46 @@
+POST http://localhost:8082/api/v1/chat/completions
+Content-Type: application/json
+Authorization: Bearer <your-local-testing-token>
+
+    {
+      "model": "gpt-4o",
+      "messages": [
+        {"role": "system", "content": [{"type": "text", "text": "You are a helpful assistant."}]},
+        {"role": "user", "content": [{"type": "text", "text": "Please summarize the cost collection fix."}]}
+      ],
+      "temperature": 0.7,
+      "max_tokens": 200,
+      "top_p": 0.95
+    }
+
+###
+POST http://localhost:8082/api/v1/responses
+Content-Type: application/json
+Authorization: Bearer <your-local-testing-token>
+
+{
+  "model": "gpt-4o",
+  "input": [
+    {
+      "role": "system",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "You are a concise helper."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Confirm the corrected token type for responses requests."
+        }
+      ]
+    }
+  ],
+  "temperature": 0.7,
+  "max_output_tokens": 200,
+  "top_p": 0.95
+}
