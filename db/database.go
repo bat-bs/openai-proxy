@@ -123,6 +123,7 @@ type Request struct {
 	OutputTokenCount      int // Output tokens (should match TokenCountComplete)
 	Model                 string
 	SnapshotVersion       string
+	IsApproximated        bool // true if any token count (e.g., output) was estimated, not provided by API
 }
 
 func (d *Database) WriteRequest(r *Request) error {
@@ -130,12 +131,12 @@ func (d *Database) WriteRequest(r *Request) error {
 		INSERT INTO requests (
 			id, api_key_id,
 			input_token_count, cached_input_token_count, output_token_count,
-			model, snapshot_version
+			model, snapshot_version, is_approximated
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 		r.ID, r.ApiKeyID,
 		r.InputTokenCount, r.CachedInputTokenCount, r.OutputTokenCount,
-		r.Model, nullOrString(r.SnapshotVersion),
+		r.Model, nullOrString(r.SnapshotVersion), r.IsApproximated,
 	)
 	return err
 }
