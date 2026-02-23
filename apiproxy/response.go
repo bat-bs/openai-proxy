@@ -1,6 +1,7 @@
 package apiproxy
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -50,170 +51,27 @@ func (rc *ResponseConf) NewResponse(in *http.Response) error {
 		log.Printf("DEV LOG: NewResponse invoked for %s status=%d content-type=%q", reqInfo, in.StatusCode, ct)
 	}
 	if strings.Contains(ct, "text/event-stream") || strings.Contains(ct, "text/event") {
-		if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
-			// Read whole body and restore it so the proxy can still stream.
-			b, err := io.ReadAll(in.Body)
-			if err != nil {
-				log.Printf("DEV LOG: failed to read SSE body: %v", err)
-				in.Body = io.NopCloser(bytes.NewReader(b))
-				return nil
-			}
-			// Restore body for downstream readers
-			in.Body = io.NopCloser(bytes.NewReader(b))
-			// Parse SSE events and extract usage objects
-			text := string(b)
-			parts := strings.Split(text, "\n\n")
-			var cumPrompt, cumCompletion int
-			var foundAny bool
-			eventIdx := 0
-			wrote := false
-			for _, p := range parts {
-				// find lines starting with "data: " and try to unmarshal the JSON
-				for _, line := range strings.Split(p, "\n") {
-					line = strings.TrimSpace(line)
-					if strings.HasPrefix(line, "data:") {
-						jsonText := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-						var raw map[string]interface{}
-						if os.Getenv("DEV_LOG_TOKEN_DEBUG") == "1" {
-							preview := jsonText
-							if len(preview) > 1024 {
-								preview = preview[:1024] + "..."
-							}
-							log.Printf("DEV DEBUG: SSE data-line: %s", preview)
-						}
-						if err := json.Unmarshal([]byte(jsonText), &raw); err != nil {
-							if os.Getenv("DEV_LOG_TOKEN_DEBUG") == "1" {
-								log.Printf("DEV DEBUG: SSE data-line JSON unmarshal error: %v; json=%s", err, jsonText)
-							}
-							continue
-						}
-						var usageFound bool
-						if u, ok := raw["usage"].(map[string]interface{}); ok {
-							totals, details := parseUsageMap(u)
-							pcount, ccount, tot, cached := extractTokenCounts(totals, details)
-							if os.Getenv("DEV_LOG_TOKEN_DEBUG") == "1" {
-								log.Printf("DEV DEBUG: extractTokenCounts returned prompt=%d completion=%d total=%d cached=%d keys=%v details=%v", pcount, ccount, tot, cached, totals, details)
-							}
-							cumPrompt += pcount
-							cumCompletion += ccount
-							foundAny = true
-							eventIdx++
-							usageFound = true
-							log.Printf("DEV LOG: SSE event %d usage: prompt=%d completion=%d total=%d cached=%d usage=%v (top-level)", eventIdx, pcount, ccount, tot, cached, totals)
-							// If this event signals completion, write to DB.
-							if !wrote {
-								if tstr, ok := raw["type"].(string); ok && tstr == "response.completed" {
-									// try to extract response id
-									if respObj, ok := raw["response"].(map[string]interface{}); ok {
-										if idv, ok := respObj["id"].(string); ok && idv != "" {
-											apiKeyID := ""
-											header := ""
-											if in.Request != nil {
-												header = in.Request.Header.Get(authHeader)
-											}
-											apiKey := strings.TrimPrefix(header, "Bearer ")
-											if hashes, err := rc.db.LookupApiKeys("*"); err == nil {
-												if uid, err := CompareToken(hashes, apiKey); err == nil {
-													apiKeyID = uid
-												}
-											}
-											modelAlias, snapshot := modelAliasFromResponseMap(respObj)
-											promptTokens := dedupPromptTokens(pcount, cached)
-											rq := db.Request{
-												ID:                    idv,
-												ApiKeyID:              apiKeyID,
-												TokenCountPrompt:      promptTokens,
-												TokenCountComplete:    ccount,
-												InputTokenCount:       pcount,
-												CachedInputTokenCount: cached,
-												OutputTokenCount:      ccount,
-												Model:                 modelAlias,
-												SnapshotVersion:       snapshot,
-											}
-											if err := rc.db.WriteRequest(&rq); err != nil {
-												log.Printf("DEV LOG: failed to write request for SSE completed id=%s: %v", idv, err)
-											} else {
-												log.Printf("DEV LOG: wrote SSE completed request id=%s prompt=%d completion=%d api_key_id=%s", idv, pcount, ccount, apiKeyID)
-											}
-											wrote = true
-										}
-									}
-								}
-							}
-						}
-						// also check nested response.usage
-						if !usageFound {
-							if respObj, ok := raw["response"].(map[string]interface{}); ok {
-								if u2, ok2 := respObj["usage"].(map[string]interface{}); ok2 {
-									totals, details := parseUsageMap(u2)
-									pcount, ccount, tot, cached := extractTokenCounts(totals, details)
-									if os.Getenv("DEV_LOG_TOKEN_DEBUG") == "1" {
-										log.Printf("DEV DEBUG: extractTokenCounts returned prompt=%d completion=%d total=%d cached=%d keys=%v details=%v", pcount, ccount, tot, cached, totals, details)
-									}
-									cumPrompt += pcount
-									cumCompletion += ccount
-									foundAny = true
-									eventIdx++
-									log.Printf("DEV LOG: SSE event %d usage: prompt=%d completion=%d total=%d cached=%d usage=%v (nested response)", eventIdx, pcount, ccount, tot, cached, totals)
-									if !wrote {
-										if tstr, ok := raw["type"].(string); ok && tstr == "response.completed" {
-											if respObj, ok := raw["response"].(map[string]interface{}); ok {
-												if idv, ok := respObj["id"].(string); ok && idv != "" {
-													apiKeyID := ""
-													header := ""
-													if in.Request != nil {
-														header = in.Request.Header.Get(authHeader)
-													}
-													apiKey := strings.TrimPrefix(header, "Bearer ")
-													if hashes, err := rc.db.LookupApiKeys("*"); err == nil {
-														if uid, err := CompareToken(hashes, apiKey); err == nil {
-															apiKeyID = uid
-														}
-													}
-													modelAlias, snapshot := modelAliasFromResponseMap(respObj)
-													promptTokens := dedupPromptTokens(pcount, cached)
-													rq := db.Request{
-														ID:                    idv,
-														ApiKeyID:              apiKeyID,
-														TokenCountPrompt:      promptTokens,
-														TokenCountComplete:    ccount,
-														InputTokenCount:       pcount,
-														CachedInputTokenCount: cached,
-														OutputTokenCount:      ccount,
-														Model:                 modelAlias,
-														SnapshotVersion:       snapshot,
-													}
-													if err := rc.db.WriteRequest(&rq); err != nil {
-														log.Printf("DEV LOG: failed to write request for SSE completed id=%s: %v", idv, err)
-													} else {
-														log.Printf("DEV LOG: wrote SSE completed request id=%s prompt=%d completion=%d api_key_id=%s", idv, pcount, ccount, apiKeyID)
-													}
-													wrote = true
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-			if foundAny {
-				log.Printf("DEV LOG: SSE cumulative usage parsed: events=%d prompt_total=%d completion_total=%d grand_total=%d", eventIdx, cumPrompt, cumCompletion, cumPrompt+cumCompletion)
-			} else {
-				log.Printf("DEV LOG: SSE Response had no usage object in data events")
-				if os.Getenv("DEV_LOG_TOKEN_DEBUG") == "1" {
-					// provide additional context: number of parts scanned and a small body preview
-					log.Printf("DEV DEBUG: scanned %d SSE parts; total bytes=%d", len(parts), len(b))
-					bodyPreview := string(b)
-					if len(bodyPreview) > 2048 {
-						bodyPreview = bodyPreview[:2048] + "..."
-					}
-					log.Printf("DEV DEBUG: SSE body preview:\n%s", bodyPreview)
-				}
-			}
+		// Create a pipe to intercept the stream without blocking it.
+		// One end goes to the client (via in.Body), the other to our parser.
+		pr, pw := io.Pipe()
+		tr := io.TeeReader(in.Body, pw)
+		in.Body = &readCloserWithCallback{
+			Reader: tr,
+			CloseFunc: func() error {
+				return pw.Close()
+			},
 		}
+
+		// Parse SSE events in a separate goroutine
+		go func() {
+			// Ensure we always close the pipe reader even if we exit early
+			defer pr.Close()
+
+			// Use a scanner or similar to read from pr
+			// We can reuse a lot of the logic below, but adapted for streaming
+			rc.parseSSEStream(pr, in.Request)
+		}()
+
 		return nil
 	}
 
@@ -353,6 +211,7 @@ func (r *Response) ProcessValues() {
 		OutputTokenCount:      ccount,
 		Model:                 modelAlias,
 		SnapshotVersion:       snapshot,
+		IsApproximated:        false,
 	}
 
 	if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
@@ -477,6 +336,290 @@ func modelAliasFromResponseMap(resp map[string]interface{}) (string, string) {
 		return splitModelSnapshot(v)
 	}
 	return "", ""
+}
+
+func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
+	// Re-use logic from the previous implementation but for a stream
+	var cumPrompt, cumCompletion, cumCached int
+	var accumulatedText strings.Builder
+	var lastModel, lastID string
+	var foundAny bool
+	eventIdx := 0
+	wrote := false
+	// Track whether we had to estimate any token usage (e.g., output tokens from accumulated text)
+	estimatedUsed := false
+
+	// Use a scanner to read line by line from the pipe
+	// SSE events are separated by double newlines
+	// We need to handle the case where a single data: block is split across lines (though rare in OpenAI)
+	// or where multiple data: lines exist in one event.
+
+	// A simple approach is to read until we find a blank line or EOF
+	// then process what we have.
+
+	// However, we can also just read line by line and if it starts with data: process it.
+	// Most usage info in OpenAI SSE is contained in a single data: line.
+
+	// We'll use a scanner.
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "data:") {
+			jsonText := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if jsonText == "[DONE]" {
+				continue
+			}
+			var raw map[string]interface{}
+			if os.Getenv("DEV_LOG_TOKEN_DEBUG") == "1" {
+				preview := jsonText
+				if len(preview) > 1024 {
+					preview = preview[:1024] + "..."
+				}
+				log.Printf("DEV DEBUG: SSE event received (data line: %s)", jsonText)
+			}
+			if err := json.Unmarshal([]byte(jsonText), &raw); err != nil {
+				if os.Getenv("DEV_LOG_TOKEN_DEBUG") == "1" {
+					log.Printf("DEV DEBUG: SSE data-line JSON unmarshal error: %v; json=%s", err, jsonText)
+				}
+				continue
+			}
+
+			// Extract text for fallback estimation
+			if t, ok := raw["text"].(string); ok {
+				accumulatedText.WriteString(t)
+			} else if part, ok := raw["part"].(map[string]interface{}); ok {
+				if t, ok := part["text"].(string); ok {
+					accumulatedText.WriteString(t)
+				}
+			} else if choices, ok := raw["choices"].([]interface{}); ok && len(choices) > 0 {
+				if choice, ok := choices[0].(map[string]interface{}); ok {
+					if delta, ok := choice["delta"].(map[string]interface{}); ok {
+						if content, ok := delta["content"].(string); ok {
+							accumulatedText.WriteString(content)
+						}
+					}
+				}
+			}
+
+			// Track ID and Model for fallback
+			if idv, ok := raw["id"].(string); ok && idv != "" {
+				lastID = idv
+			}
+			if modelv, ok := raw["model"].(string); ok && modelv != "" {
+				lastModel = modelv
+			}
+
+			var usageFound bool
+			var pcount, ccount, cached int
+			if u, ok := raw["usage"].(map[string]interface{}); ok {
+				totals, details := parseUsageMap(u)
+				pcount, ccount, _, cached = extractTokenCounts(totals, details)
+				cumPrompt = max(cumPrompt, pcount)
+				cumCompletion = max(cumCompletion, ccount)
+				cumCached = max(cumCached, cached)
+				foundAny = true
+				eventIdx++
+				usageFound = true
+				if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
+					log.Printf("DEV LOG: SSE event %d usage: prompt=%d completion=%d cached=%d (top-level)", eventIdx, pcount, ccount, cached)
+				}
+			}
+			// also check nested response.usage
+			if !usageFound {
+				if respObj, ok := raw["response"].(map[string]interface{}); ok {
+					if u2, ok2 := respObj["usage"].(map[string]interface{}); ok2 {
+						totals, details := parseUsageMap(u2)
+						pcount, ccount, _, cached = extractTokenCounts(totals, details)
+						cumPrompt = max(cumPrompt, pcount)
+						cumCompletion = max(cumCompletion, ccount)
+						cumCached = max(cumCached, cached)
+						foundAny = true
+						eventIdx++
+						usageFound = true
+						if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
+							log.Printf("DEV LOG: SSE event %d usage: prompt=%d completion=%d cached=%d (nested response)", eventIdx, pcount, ccount, cached)
+						}
+					}
+					if idv, ok := respObj["id"].(string); ok && idv != "" {
+						lastID = idv
+					}
+					if modelv, ok := respObj["model"].(string); ok && modelv != "" {
+						lastModel = modelv
+					}
+				}
+			}
+
+			// If this event signals completion, write to DB.
+			if !wrote {
+				isCompleted := false
+				if tstr, ok := raw["type"].(string); ok && tstr == "response.completed" {
+					isCompleted = true
+				}
+				// Also check for finished choices in standard chat completion stream
+				if choices, ok := raw["choices"].([]interface{}); ok && len(choices) > 0 {
+					if choice, ok := choices[0].(map[string]interface{}); ok {
+						if finish, ok := choice["finish_reason"].(string); ok && finish != "" {
+							// Not necessarily the very last event if usage follows,
+							// but it's a signal.
+							// Actually, we should wait for the usage event if possible.
+						}
+					}
+				}
+
+				if isCompleted {
+					respID := lastID
+					respModel := lastModel
+					if respObj, ok := raw["response"].(map[string]interface{}); ok {
+						if idv, ok := respObj["id"].(string); ok && idv != "" {
+							respID = idv
+						}
+						if modelv, ok := respObj["model"].(string); ok && modelv != "" {
+							respModel = modelv
+						}
+					}
+
+					if respID != "" {
+						apiKeyID := ""
+						header := ""
+						if req != nil {
+							header = req.Header.Get(authHeader)
+						}
+						apiKey := strings.TrimPrefix(header, "Bearer ")
+						if hashes, err := rc.db.LookupApiKeys("*"); err == nil {
+							if uid, err := CompareToken(hashes, apiKey); err == nil {
+								apiKeyID = uid
+							}
+						}
+
+						// Final counts: prefer current event, then cumulative, then estimation
+						finalPrompt := pcount
+						finalCompletion := ccount
+						finalCached := cached
+
+						if finalPrompt == 0 {
+							finalPrompt = cumPrompt
+						}
+						if finalCompletion == 0 {
+							finalCompletion = cumCompletion
+						}
+						if finalCached == 0 {
+							finalCached = cumCached
+						}
+
+						// Estimation fallback for completion tokens
+						if finalCompletion == 0 && accumulatedText.Len() > 0 {
+							// Simple heuristic: 1 token ≈ 4 characters
+							finalCompletion = accumulatedText.Len() / 4
+							if finalCompletion == 0 && accumulatedText.Len() > 0 {
+								finalCompletion = 1
+							}
+							estimatedUsed = true
+							if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
+								log.Printf("DEV LOG: using estimated completion tokens: %d (chars: %d)", finalCompletion, accumulatedText.Len())
+							}
+						}
+
+						modelAlias, snapshot := splitModelSnapshot(respModel)
+						promptTokens := dedupPromptTokens(finalPrompt, finalCached)
+						rq := db.Request{
+							ID:                    respID,
+							ApiKeyID:              apiKeyID,
+							TokenCountPrompt:      promptTokens,
+							TokenCountComplete:    finalCompletion,
+							InputTokenCount:       finalPrompt,
+							CachedInputTokenCount: finalCached,
+							OutputTokenCount:      finalCompletion,
+							Model:                 modelAlias,
+							SnapshotVersion:       snapshot,
+							IsApproximated:        estimatedUsed,
+						}
+						if err := rc.db.WriteRequest(&rq); err != nil {
+							log.Printf("DEV LOG: failed to write request for SSE completed id=%s: %v", respID, err)
+						} else {
+							if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
+								log.Printf("DEV LOG: wrote SSE completed request id=%s prompt=%d completion=%d api_key_id=%s", respID, finalPrompt, finalCompletion, apiKeyID)
+							}
+						}
+						wrote = true
+					}
+				}
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("DEV LOG: SSE stream scanner error: %v", err)
+	}
+
+	if !wrote && lastID != "" {
+		// Try fallback if we haven't written yet (e.g. stream ended without response.completed but we have an ID)
+		apiKeyID := ""
+		header := ""
+		if req != nil {
+			header = req.Header.Get(authHeader)
+		}
+		apiKey := strings.TrimPrefix(header, "Bearer ")
+		if hashes, err := rc.db.LookupApiKeys("*"); err == nil {
+			if uid, err := CompareToken(hashes, apiKey); err == nil {
+				apiKeyID = uid
+			}
+		}
+
+		finalPrompt := cumPrompt
+		finalCompletion := cumCompletion
+		finalCached := cumCached
+		estimated := false
+
+		if finalCompletion == 0 && accumulatedText.Len() > 0 {
+			finalCompletion = accumulatedText.Len() / 4
+			if finalCompletion == 0 && accumulatedText.Len() > 0 {
+				finalCompletion = 1
+			}
+			estimated = true
+		}
+
+		modelAlias, snapshot := splitModelSnapshot(lastModel)
+		promptTokens := dedupPromptTokens(finalPrompt, finalCached)
+		rq := db.Request{
+			ID:                    lastID,
+			ApiKeyID:              apiKeyID,
+			TokenCountPrompt:      promptTokens,
+			TokenCountComplete:    finalCompletion,
+			InputTokenCount:       finalPrompt,
+			CachedInputTokenCount: finalCached,
+			OutputTokenCount:      finalCompletion,
+			Model:                 modelAlias,
+			SnapshotVersion:       snapshot,
+			IsApproximated:        estimated,
+		}
+		if err := rc.db.WriteRequest(&rq); err == nil {
+			if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
+				log.Printf("DEV LOG: wrote SSE request (fallback at end of stream) id=%s prompt=%d completion=%d", lastID, finalPrompt, finalCompletion)
+			}
+		}
+	}
+
+	if foundAny {
+		if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
+			log.Printf("DEV LOG: SSE stream processing finished: events=%d prompt_max=%d completion_max=%d", eventIdx, cumPrompt, cumCompletion)
+		}
+	}
+}
+
+type readCloserWithCallback struct {
+	io.Reader
+	CloseFunc func() error
+}
+
+func (r *readCloserWithCallback) Close() error {
+	if r.CloseFunc != nil {
+		return r.CloseFunc()
+	}
+	if closer, ok := r.Reader.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
 func parseUsageMap(raw map[string]interface{}) (map[string]int, map[string]map[string]int) {

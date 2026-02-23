@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Reproduce case where SSE events use nested response.usage in response.completed
@@ -60,8 +61,21 @@ func TestNewResponse_SSENestedUsage(t *testing.T) {
 		t.Fatalf("NewResponse error: %v", err)
 	}
 
+	// Drain the body to trigger the TeeReader and SSE parsing
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
 	out := buf.String()
-	if !strings.Contains(out, "SSE cumulative usage parsed") && !strings.Contains(out, "SSE event") {
+	// Wait a bit for goroutine to process
+	for i := 0; i < 10; i++ {
+		if strings.Contains(out, "wrote SSE completed request") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+		out = buf.String()
+	}
+
+	if !strings.Contains(out, "SSE event") {
 		t.Fatalf("expected SSE usage logs but none found. Logs:\n%s", out)
 	}
 

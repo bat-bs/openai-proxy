@@ -64,7 +64,6 @@ type baseHandle struct {
 func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := r.Header.Get("Backend")
 	r.Header.Del("Backend")
-	log.Println(r.Header.Get("Content-Type"))
 
 	// Intercept OpenAI-compatible models endpoints and serve locally
 	if strings.HasPrefix(r.URL.Path, "/api/models") || strings.HasPrefix(r.URL.Path, "/api/v1/models") {
@@ -90,7 +89,6 @@ func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if backend == "" {
-		log.Printf("No backend specified, the default backend (%s) will be used.", defaultBackend)
 		if defaultBackend == "azure" {
 			h.HandleAzure(w, r, defaultBackend)
 			return
@@ -121,7 +119,6 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 		return
 	}
 
-	log.Printf("Received Request for Backend %s for remoteURL %s", backend, remoteUrl)
 	proxy := httputil.NewSingleHostReverseProxy(remoteUrl)
 	r.Host = remoteUrl.Host
 	// Remove proxy/ingress headers that should not be forwarded to Azure.
@@ -162,7 +159,6 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	actualURL.Path = singleJoiningSlash(remoteUrl.Path, r.URL.Path)
 	// Combine query params from remote (none) and the request (we already encoded api-version into r.URL.RawQuery)
 	actualURL.RawQuery = r.URL.RawQuery
-	log.Printf("Proxying request to Azure backend: %s", actualURL.String())
 	// Dev: optionally log outgoing request details (without exposing full secrets).
 	if os.Getenv("DEV_LOG_REQUEST") == "1" {
 		// log method, path, masked headers, and body preview
@@ -225,7 +221,6 @@ func (h *baseHandle) SetAzureUrl(r *http.Request) *url.URL {
 	// proxy preserves the `/v1` segment, so combining this base with the
 	// incoming path yields `/openai/v1/...` as required by the v1 API.
 	azureUrl := fmt.Sprintf("https://%s.%s/openai", h.az.DeploymentName, h.az.BaseUrl)
-	log.Println("Set Azure URL to ", azureUrl)
 	url, err := url.Parse(azureUrl)
 	if err != nil {
 		log.Println("target parse fail:", err)
