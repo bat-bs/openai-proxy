@@ -1,21 +1,7 @@
-import { ApiKeysTable } from "~/app/my-api-keys/api-keys-table";
-import { auth } from "~/server/auth";
-import { api } from "~/trpc/server";
+import { ApiKeysTable } from "~/app/my-api-keys/api-keys-table"
+import { api } from "~/trpc/server"
 
 export default async function MyApiKeysPage() {
-	const session = await auth();
-
-	if (!session?.user) {
-		return (
-			<div className="mx-auto w-full max-w-5xl px-6 py-10">
-				<h1 className="text-2xl font-semibold">My API Keys</h1>
-				<p className="mt-2 text-sm text-muted-foreground">
-					Sign in to view and manage your API keys.
-				</p>
-			</div>
-		);
-	}
-
 	const data = await api.apiKey.getApiKeys();
 
 	return (
@@ -30,5 +16,5 @@ export default async function MyApiKeysPage() {
 				<ApiKeysTable data={data} />
 			</div>
 		</div>
-	);
+	)
 }

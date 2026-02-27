@@ -2,16 +2,12 @@ import {
     Sidebar,
     SidebarContent,
     SidebarFooter,
-    SidebarGroup,
-    SidebarGroupContent,
     SidebarHeader,
-    SidebarMenu,
-    SidebarMenuButton,
-    SidebarMenuItem,
 } from "~/components/ui/sidebar"
-import { KeyRound, LogOut } from "lucide-react"
+import { LogOut } from "lucide-react"
 import Link from "next/link"
 import { auth } from "~/server/auth"
+import { SidebarNav } from "~/components/sidebar-nav"
 
 export async function AppSidebar() {
     const session = await auth();
@@ -21,20 +17,7 @@ export async function AppSidebar() {
             <SidebarHeader>
             </SidebarHeader>
             <SidebarContent>
-                <SidebarGroup>
-                    <SidebarGroupContent className="flex flex-col gap-2">
-                        <SidebarMenu>
-                            <SidebarMenuItem>
-                                <Link href="/my-api-keys">
-                                    <SidebarMenuButton tooltip={"Test"}>
-                                        <KeyRound />
-                                        <span>Meine API-Schlüssel</span>
-                                    </SidebarMenuButton>
-                                </Link>
-                            </SidebarMenuItem>
-                        </SidebarMenu>
-                    </SidebarGroupContent>
-                </SidebarGroup>
+                <SidebarNav isAdmin={session?.user?.isAdmin ?? false} />
             </SidebarContent>
             <SidebarFooter>
                 {session?.user ? (

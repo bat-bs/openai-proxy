@@ -2,12 +2,14 @@ import "~/styles/globals.css";
 
 import type {Metadata} from "next";
 import {Geist} from "next/font/google";
+import {redirect} from "next/navigation";
 
-import {TRPCReactProvider} from "~/trpc/react";
-import {TooltipProvider} from "~/components/ui/tooltip";
 import {AppSidebar} from "~/components/app-sidebar";
-import {SidebarInset, SidebarProvider} from "~/components/ui/sidebar";
 import {SiteHeader} from "~/components/site-header";
+import {SidebarInset, SidebarProvider} from "~/components/ui/sidebar";
+import {TooltipProvider} from "~/components/ui/tooltip";
+import {auth} from "~/server/auth";
+import {TRPCReactProvider} from "~/trpc/react";
 
 export const metadata: Metadata = {
     title: "Create T3 App",
@@ -20,11 +22,23 @@ const geist = Geist({
     variable: "--font-geist-sans",
 });
 
-export default function RootLayout({
-                                       children,
-                                   }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({
+                                            children,
+                                        }: Readonly<{ children: React.ReactNode }>) {
+    const session = await auth();
+    if (!session?.user) {
+        redirect("/api/auth/signin");
+    }
     return (
-        <html className={`${geist.variable}`} lang="en">
+        <html className={`${geist.variable}`} lang="en" suppressHydrationWarning>
+        <head>
+            <script
+                dangerouslySetInnerHTML={{
+                    __html:
+                        "(function(){try{var t=localStorage.getItem('theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var e=t?t==='dark':d;document.documentElement.classList.toggle('dark',e);}catch(_){}})();",
+                }}
+            />
+        </head>
         <body>
         <TRPCReactProvider>
             <TooltipProvider>

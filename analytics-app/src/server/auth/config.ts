@@ -1,6 +1,18 @@
 import type { DefaultSession, NextAuthConfig } from "next-auth";
 import ZitadelProvider from "next-auth/providers/zitadel";
 
+function decodeJwtPayload(token: string): unknown {
+	try {
+		const payload = token.split(".")[1];
+		if (!payload) return null;
+		const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+		const json = Buffer.from(base64, "base64").toString("utf8");
+		return JSON.parse(json);
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Module augmentation for `next-auth` types. Allows us to add custom properties to the `session`
  * object and keep type safety.
@@ -11,6 +23,7 @@ declare module "next-auth" {
 	interface Session extends DefaultSession {
 		user: {
 			id: string;
+			isAdmin: boolean;
 			// ...other properties
 			// role: UserRole;
 		} & DefaultSession["user"];
@@ -20,6 +33,12 @@ declare module "next-auth" {
 	//   // ...other properties
 	//   // role: UserRole;
 	// }
+}
+
+declare module "next-auth/jwt" {
+	interface JWT {
+		roles?: string[];
+	}
 }
 
 /**
@@ -45,9 +64,18 @@ export const authConfig = {
 		 */
 	],
 	callbacks: {
-		async jwt({ token, profile }) {
+		async jwt({ token, profile, account }) {
 			if (profile?.sub) {
 				token.sub = profile.sub;
+			}
+			if (Array.isArray(profile?.roles)) {
+				token.roles = profile.roles;
+			}
+			if (!token.roles && typeof account?.id_token === "string") {
+				const claims = decodeJwtPayload(account.id_token) as { roles?: unknown } | null;
+				if (Array.isArray(claims?.roles)) {
+					token.roles = claims.roles as string[];
+				}
 			}
 			if (profile?.picture) {
 				token.picture = profile.picture;
@@ -61,6 +89,9 @@ export const authConfig = {
 				if (typeof token.picture === "string") {
 					session.user.image = token.picture;
 				}
+				session.user.isAdmin = Array.isArray(token.roles)
+					? token.roles.includes("admin")
+					: false;
 			}
 			return session;
 		},
