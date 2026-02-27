@@ -1,9 +1,6 @@
-import { ApiKeysTable } from "~/app/my-api-keys/api-keys-table"
-import { api } from "~/trpc/server"
+import { ApiKeysClient } from "~/app/my-api-keys/api-keys-client"
 
 export default async function MyApiKeysPage() {
-	const data = await api.apiKey.getApiKeys();
-
 	return (
 		<div className="mx-auto w-full max-w-6xl px-6 py-10">
 			<div className="space-y-2">
@@ -13,7 +10,7 @@ export default async function MyApiKeysPage() {
 				</p>
 			</div>
 			<div className="mt-6">
-				<ApiKeysTable data={data} />
+				<ApiKeysClient />
 			</div>
 		</div>
 	)

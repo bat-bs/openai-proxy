@@ -1,7 +1,38 @@
+import { randomBytes, randomUUID } from "crypto";
 import { eq, sql } from "drizzle-orm";
+import { hash } from "bcryptjs";
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { apikeys, requests, users } from "~/server/db/schema";
+
+const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+function base32Encode(bytes: Uint8Array) {
+	let output = "";
+	let value = 0;
+	let bits = 0;
+
+	for (const byte of bytes) {
+		value = (value << 8) | byte;
+		bits += 8;
+		while (bits >= 5) {
+			output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+			bits -= 5;
+		}
+	}
+
+	if (bits > 0) {
+		output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+	}
+
+	while (output.length % 8 !== 0) {
+		output += "=";
+	}
+
+	return output;
+}
 
 export const apiKeyRouter = createTRPCRouter({
 	getApiKeys: protectedProcedure.query(async ({ ctx }) => {
@@ -39,4 +70,36 @@ export const apiKeyRouter = createTRPCRouter({
 			createdAt: row.createdAt ?? null,
 		}));
 	}),
+	createApiKey: protectedProcedure
+		.input(
+			z.object({
+				aiapi: z.string().trim().min(1).max(255),
+				description: z.string().trim().max(255).optional(),
+			})
+		)
+		.mutation(async ({ ctx, input }) => {
+			const owner = ctx.session.user.id;
+			if (!owner) {
+				throw new TRPCError({ code: "UNAUTHORIZED" });
+			}
+
+			const token = base32Encode(randomBytes(32)).slice(0, 32);
+			const hashed = await hash(token, 5);
+			const id = randomUUID();
+
+			await ctx.db
+				.insert(users)
+				.values({ id: owner })
+				.onConflictDoNothing();
+
+			await ctx.db.insert(apikeys).values({
+				uuid: id,
+				apikey: hashed,
+				owner,
+				aiapi: input.aiapi,
+				description: input.description?.trim() || null,
+			});
+
+			return { token, id };
+		}),
 });

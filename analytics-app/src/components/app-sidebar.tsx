@@ -15,6 +15,7 @@ export async function AppSidebar() {
     return (
         <Sidebar variant="inset">
             <SidebarHeader>
+
             </SidebarHeader>
             <SidebarContent>
                 <SidebarNav isAdmin={session?.user?.isAdmin ?? false} />
