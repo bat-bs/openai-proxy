@@ -7,8 +7,11 @@ import {
 } from "~/components/ui/sidebar"
 import {KeyRound, User2} from "lucide-react";
 import Link from "next/link";
+import {auth} from "~/server/auth";
 
-export function AppSidebar() {
+export async function AppSidebar() {
+    const session = await auth();
+
     return (
         <Sidebar variant="floating">
             <SidebarHeader>
@@ -29,6 +32,14 @@ export function AppSidebar() {
                     </SidebarGroupContent>
                 </SidebarGroup>
             </SidebarContent>
+            <SidebarFooter>
+                <Link
+                    className="rounded-full bg-white/10 px-10 py-3 font-semibold no-underline transition hover:bg-white/20"
+                    href={session ? "/api/auth/signout" : "/api/auth/signin"}
+                >
+                    {session ? "Sign out" : "Sign in"}
+                </Link>
+            </SidebarFooter>
         </Sidebar>
     )
 }
