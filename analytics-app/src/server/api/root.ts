@@ -1,6 +1,7 @@
+import { adminRouter } from "~/server/api/routers/admin";
+import { apiKeyRouter } from "~/server/api/routers/api-key";
 import { postRouter } from "~/server/api/routers/post";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
-import {apiKeyRouter} from "~/server/api/routers/api-key";
 
 /**
  * This is the primary router for your server.
@@ -8,6 +9,7 @@ import {apiKeyRouter} from "~/server/api/routers/api-key";
  * All routers added in /api/routers should be manually added here.
  */
 export const appRouter = createTRPCRouter({
+	admin: adminRouter,
 	post: postRouter,
 	apiKey: apiKeyRouter,
 });

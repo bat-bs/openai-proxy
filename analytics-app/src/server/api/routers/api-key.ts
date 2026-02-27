@@ -12,9 +12,10 @@ export const apiKeyRouter = createTRPCRouter({
 			.select({
 				id: apikeys.uuid,
 				description: apikeys.description,
-				inputTokens: sql<number>`coalesce(sum(${requests.inputTokenCount}), 0)`.as(
-					"inputTokens"
-				),
+				inputTokens:
+					sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
+						"inputTokens"
+					),
 				cachedInputTokens: sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
 					"cachedInputTokens"
 				),
