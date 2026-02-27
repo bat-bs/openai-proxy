@@ -5,8 +5,8 @@ import { apikeys, requests, users } from "~/server/db/schema";
 
 export const apiKeyRouter = createTRPCRouter({
 	getApiKeys: protectedProcedure.query(async ({ ctx }) => {
-		const userName = ctx.session.user.name;
-		if (!userName) return [];
+		const userId = ctx.session.user.id;
+		if (!userId) return [];
 
 		const rows = await ctx.db
 			.select({
@@ -26,7 +26,7 @@ export const apiKeyRouter = createTRPCRouter({
 			.from(apikeys)
 			.innerJoin(users, eq(apikeys.owner, users.id))
 			.leftJoin(requests, eq(apikeys.uuid, requests.apiKeyId))
-			.where(eq(users.name, userName))
+			.where(eq(users.id, userId))
 			.groupBy(apikeys.uuid, apikeys.description);
 
 		return rows.map((row) => ({

@@ -44,4 +44,25 @@ export const authConfig = {
 		 * @see https://next-auth.js.org/providers/github
 		 */
 	],
+	callbacks: {
+		async jwt({ token, profile }) {
+			if (profile?.sub) {
+				token.sub = profile.sub;
+			}
+			if (profile?.picture) {
+				token.picture = profile.picture;
+			}
+			return token;
+		},
+		async session({ session, token }) {
+			if (session.user) {
+				const sub = token.sub ?? session.user.id;
+				session.user.id = sub;
+				if (typeof token.picture === "string") {
+					session.user.image = token.picture;
+				}
+			}
+			return session;
+		},
+	},
 } satisfies NextAuthConfig;
