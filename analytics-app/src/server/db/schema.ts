@@ -78,12 +78,12 @@ export const models = pgTable("models", {
 export const costs = pgTable("costs", {
 	model: varchar({ length: 255 }).notNull(),
 	price: integer().notNull(),
-	requestDay: date("request_day").defaultNow().notNull(),
+	validFrom: date("valid_from").defaultNow().notNull(),
 	tokenType: varchar("token_type", { length: 255 }).notNull(),
 	unitOfMessure: varchar("unit_of_messure", { length: 255 }),
 	isRegional: boolean("is_regional").notNull(),
 	backendName: varchar("backend_name", { length: 255 }).notNull(),
 	currency: char({ length: 3 }),
 }, (table) => [
-	primaryKey({ columns: [table.model, table.price, table.requestDay, table.tokenType, table.isRegional, table.backendName], name: "costs_pkey"}),
+	primaryKey({ columns: [table.model, table.price, table.validFrom, table.tokenType, table.isRegional, table.backendName], name: "costs_pkey"}),
 ]);

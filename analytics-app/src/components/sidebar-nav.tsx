@@ -1,6 +1,6 @@
 "use client"
 
-import { BarChart3, KeyRound } from "lucide-react"
+import { BarChart3, Coins, KeyRound } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -22,11 +22,16 @@ const userItems = [
 ]
 
 const adminItems = [
-    {
-        href: "/admin/usage",
-        label: "Nutzungsstatistiken",
-        icon: BarChart3,
-    },
+	{
+		href: "/admin/usage",
+		label: "Nutzungsstatistiken",
+		icon: BarChart3,
+	},
+	{
+		href: "/admin/costs",
+		label: "Kosten",
+		icon: Coins,
+	},
 ]
 
 export function SidebarNav({ isAdmin }: { isAdmin: boolean }) {
