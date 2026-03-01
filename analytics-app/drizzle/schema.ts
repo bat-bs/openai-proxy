@@ -1,4 +1,4 @@
-import { pgTable, varchar, bigint, timestamp, text, jsonb, foreignKey, integer, boolean, primaryKey, date, char } from "drizzle-orm/pg-core"
+import { pgTable, varchar, bigint, timestamp, text, jsonb, foreignKey, integer, boolean, primaryKey, date, char, pgEnum } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 
@@ -78,12 +78,14 @@ export const models = pgTable("models", {
 	id: varchar({ length: 255 }).primaryKey().notNull(),
 });
 
+export const costUnit = pgEnum("cost_unit", ["1M", "1K"]);
+
 export const costs = pgTable("costs", {
 	model: varchar({ length: 255 }).notNull(),
 	price: integer().notNull(),
 	validFrom: date("valid_from").defaultNow().notNull(),
 	tokenType: varchar("token_type", { length: 255 }).notNull(),
-	unitOfMessure: varchar("unit_of_messure", { length: 255 }),
+	unitOfMessure: costUnit("unit_of_messure"),
 	isRegional: boolean("is_regional").notNull(),
 	backendName: varchar("backend_name", { length: 255 }).notNull(),
 	currency: char({ length: 3 }),

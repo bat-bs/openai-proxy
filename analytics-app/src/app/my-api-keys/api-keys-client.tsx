@@ -15,6 +15,7 @@ import {
 import { Input } from "~/components/ui/input";
 import { api } from "~/trpc/react";
 import { ApiKeysTable } from "./api-keys-table";
+import { toast } from "sonner";
 
 export function ApiKeysClient() {
 	const utils = api.useUtils();
@@ -32,6 +33,10 @@ export function ApiKeysClient() {
 			setDescription("");
 			setCopied(false);
 			await utils.apiKey.getApiKeys.invalidate();
+			toast.success("API key created.");
+		},
+		onError: () => {
+			toast.error("Failed to create API key.");
 		},
 	});
 

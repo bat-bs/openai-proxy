@@ -1,8 +1,10 @@
 "use client"
 
+import { useEffect, useMemo, useState } from "react"
 import { Pie, PieChart } from "recharts"
 import { useRouter } from "next/navigation"
 
+import { Button } from "~/components/ui/button"
 import {
     ChartContainer,
     ChartLegend,
@@ -11,7 +13,16 @@ import {
     ChartTooltipContent,
     type ChartConfig,
 } from "~/components/ui/chart"
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "~/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs"
+import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select"
 
 type UsageModel = {
     model: string
@@ -61,6 +72,12 @@ export function AdminUsageDashboard({
         dateStyle: "medium",
         timeStyle: "short",
     })
+    const [pageIndex, setPageIndex] = useState(0)
+    const [pageSize, setPageSize] = useState(10)
+
+    useEffect(() => {
+        setPageIndex(0)
+    }, [stats.users.length])
 
     const pieData = stats.modelUsage.map((item, index) => {
         const key = `model-${index}`
@@ -79,6 +96,16 @@ export function AdminUsageDashboard({
         }
         return acc
     }, {})
+
+    const totalUsers = stats.users.length
+    const totalPages = Math.max(1, Math.ceil(totalUsers / pageSize))
+    const clampedPageIndex = Math.min(pageIndex, totalPages - 1)
+    const startRow = totalUsers === 0 ? 0 : clampedPageIndex * pageSize + 1
+    const endRow = Math.min(totalUsers, (clampedPageIndex + 1) * pageSize)
+    const pagedUsers = useMemo(() => {
+        const start = clampedPageIndex * pageSize
+        return stats.users.slice(start, start + pageSize)
+    }, [clampedPageIndex, pageSize, stats.users])
 
     return (
         <div className="mx-auto w-full max-w-6xl px-6 py-10">
@@ -145,54 +172,129 @@ export function AdminUsageDashboard({
                     <div className="text-xs font-medium text-muted-foreground">
                         Usage by user
                     </div>
-                    <div className="mt-4 overflow-x-auto">
-                        <table className="w-full border-collapse text-xs">
-                            <thead>
-                                <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                                    <th className="pb-2 pr-3 font-medium">Username</th>
-                                    <th className="pb-2 pr-3 font-medium">Input tokens</th>
-                                    <th className="pb-2 pr-3 font-medium">Cached tokens</th>
-                                    <th className="pb-2 pr-3 font-medium">Output tokens</th>
-                                    <th className="pb-2 font-medium">Last activity</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {stats.users.map((user) => (
-                                    <tr
+                    <div className="mt-4">
+                        <Table className="border-collapse text-xs">
+                            <TableHeader>
+                                <TableRow className="border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                                    <TableHead className="pb-2 pr-3 font-medium">
+                                        Username
+                                    </TableHead>
+                                    <TableHead className="pb-2 pr-3 font-medium">
+                                        Input tokens
+                                    </TableHead>
+                                    <TableHead className="pb-2 pr-3 font-medium">
+                                        Cached tokens
+                                    </TableHead>
+                                    <TableHead className="pb-2 pr-3 font-medium">
+                                        Output tokens
+                                    </TableHead>
+                                    <TableHead className="pb-2 font-medium">
+                                        Last activity
+                                    </TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {pagedUsers.map((user) => (
+                                    <TableRow
                                         key={user.id}
-                                        className="border-b border-border/60 last:border-0"
+                                        className="border-border/60 last:border-0"
                                     >
-                                        <td className="py-2 pr-3 font-medium">
+                                        <TableCell className="py-2 pr-3 font-medium">
                                             {user.name}
-                                        </td>
-                                        <td className="py-2 pr-3">
+                                        </TableCell>
+                                        <TableCell className="py-2 pr-3">
                                             {numberFormatter.format(user.inputTokens)}
-                                        </td>
-                                        <td className="py-2 pr-3">
+                                        </TableCell>
+                                        <TableCell className="py-2 pr-3">
                                             {numberFormatter.format(user.cachedTokens)}
-                                        </td>
-                                        <td className="py-2 pr-3">
+                                        </TableCell>
+                                        <TableCell className="py-2 pr-3">
                                             {numberFormatter.format(user.outputTokens)}
-                                        </td>
-                                        <td className="py-2">
+                                        </TableCell>
+                                        <TableCell className="py-2">
                                             {user.lastActivity
                                                 ? dateFormatter.format(new Date(user.lastActivity))
                                                 : "—"}
-                                        </td>
-                                    </tr>
+                                        </TableCell>
+                                    </TableRow>
                                 ))}
                                 {!stats.users.length ? (
-                                    <tr>
-                                        <td
+                                    <TableRow>
+                                        <TableCell
                                             colSpan={5}
                                             className="py-4 text-center text-muted-foreground"
                                         >
                                             No users found.
-                                        </td>
-                                    </tr>
+                                        </TableCell>
+                                    </TableRow>
                                 ) : null}
-                            </tbody>
-                        </table>
+                            </TableBody>
+                        </Table>
+                        <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                <span>Rows per page</span>
+                                <NativeSelect
+                                    value={String(pageSize)}
+                                    onChange={(event) => {
+                                        setPageSize(Number(event.target.value))
+                                        setPageIndex(0)
+                                    }}
+                                    className="w-[80px]"
+                                    size="sm"
+                                >
+                                    {[10, 20, 50].map((size) => (
+                                        <NativeSelectOption key={size} value={String(size)}>
+                                            {size}
+                                        </NativeSelectOption>
+                                    ))}
+                                </NativeSelect>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-muted-foreground">
+                                    {startRow}-{endRow} of {totalUsers}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setPageIndex(0)}
+                                        disabled={clampedPageIndex === 0}
+                                    >
+                                        First
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                            setPageIndex((prev) => Math.max(0, prev - 1))
+                                        }
+                                        disabled={clampedPageIndex === 0}
+                                    >
+                                        Prev
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                            setPageIndex((prev) =>
+                                                Math.min(totalPages - 1, prev + 1)
+                                            )
+                                        }
+                                        disabled={clampedPageIndex >= totalPages - 1}
+                                    >
+                                        Next
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setPageIndex(totalPages - 1)}
+                                        disabled={clampedPageIndex >= totalPages - 1}
+                                    >
+                                        Last
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -19,12 +19,18 @@ CREATE TABLE IF NOT EXISTS apiKeys (
     AiApi       VARCHAR(255),
     Description VARCHAR(255)
 );
+
+DO $$ BEGIN
+    CREATE TYPE cost_unit AS ENUM ('1M', '1K');
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 CREATE TABLE IF NOT EXISTS costs (
     model VARCHAR(255) NOT NULL,
     price integer NOT NULL,
     request_day date DEFAULT now(),
     token_type VARCHAR(255), 
-    unit_of_messure VARCHAR(255),
+    unit_of_messure cost_unit,
     is_regional BOOLEAN,
     backend_name VARCHAR(255),
     currency CHAR(3),
@@ -39,4 +45,3 @@ CREATE TABLE IF NOT EXISTS requests (
     token_count_complete integer NOT NULL,
     model VARCHAR(255)
 );
-

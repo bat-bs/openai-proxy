@@ -4,10 +4,13 @@ import { useMemo, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
 import { api } from "~/trpc/react";
 import { CostsTable } from "./costs-table";
+import { toast } from "sonner";
+import { costUnitOptions } from "~/lib/costs";
 
-const defaultUnit = "1M";
+const defaultUnit = costUnitOptions[0];
 const defaultBackend = "openai";
 const defaultCurrency = "EUR";
 const defaultTokenType = "input";
@@ -41,18 +44,30 @@ export function CostsClient() {
 			setBackendName(defaultBackend);
 			setCurrency(defaultCurrency);
 			await utils.admin.listCosts.invalidate();
+			toast.success("Eintrag erstellt.");
+		},
+		onError: () => {
+			toast.error("Eintrag konnte nicht erstellt werden.");
 		},
 	});
 
 	const updateCost = api.admin.updateCost.useMutation({
 		onSuccess: async () => {
 			await utils.admin.listCosts.invalidate();
+			toast.success("Eintrag aktualisiert.");
+		},
+		onError: () => {
+			toast.error("Eintrag konnte nicht aktualisiert werden.");
 		},
 	});
 
 	const updatePricing = api.admin.updatePricing.useMutation({
 		onSuccess: async () => {
 			await utils.admin.listCosts.invalidate();
+			toast.success("Preise aktualisiert.");
+		},
+		onError: () => {
+			toast.error("Preise konnten nicht aktualisiert werden.");
 		},
 	});
 
@@ -119,11 +134,17 @@ export function CostsClient() {
 							</div>
 							<div className="flex flex-col gap-1">
 								<label className="text-xs font-medium text-muted-foreground">Einheit</label>
-								<Input
+								<NativeSelect
 									value={unitOfMessure}
 									onChange={(event) => setUnitOfMessure(event.target.value)}
-									placeholder="1M"
-								/>
+									className="w-full"
+								>
+									{costUnitOptions.map((unit) => (
+										<NativeSelectOption key={unit} value={unit}>
+											{unit}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
 							</div>
 							<div className="flex flex-col gap-1">
 								<label className="text-xs font-medium text-muted-foreground">Backend</label>

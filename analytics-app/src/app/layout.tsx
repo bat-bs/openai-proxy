@@ -10,6 +10,7 @@ import {SidebarInset, SidebarProvider} from "~/components/ui/sidebar";
 import {TooltipProvider} from "~/components/ui/tooltip";
 import {auth} from "~/server/auth";
 import {TRPCReactProvider} from "~/trpc/react";
+import {Toaster} from "~/components/ui/sonner";
 
 export const metadata: Metadata = {
     title: "Create T3 App",
@@ -43,6 +44,7 @@ export default async function RootLayout({
         <TRPCReactProvider>
             <TooltipProvider>
                 <SidebarProvider>
+                    <Toaster />
                     <AppSidebar/>
                     <SidebarInset>
                         <SiteHeader/>

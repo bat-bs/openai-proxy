@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { api } from "~/trpc/react";
+import { toast } from "sonner";
 
 export function LatestPost() {
 	const [latestPost] = api.post.getLatest.useSuspenseQuery();
@@ -13,6 +14,10 @@ export function LatestPost() {
 		onSuccess: async () => {
 			await utils.post.invalidate();
 			setName("");
+			toast.success("Post created.");
+		},
+		onError: () => {
+			toast.error("Failed to create post.");
 		},
 	});
 

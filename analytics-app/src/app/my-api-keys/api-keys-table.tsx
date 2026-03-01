@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
 	type ColumnDef,
 	flexRender,
 	getCoreRowModel,
 	getFilteredRowModel,
+	getPaginationRowModel,
 	getSortedRowModel,
 	type SortingState,
 	useReactTable,
@@ -14,6 +15,15 @@ import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "~/components/ui/table";
 
 export type ApiKeyRow = {
 	id: string;
@@ -45,6 +55,10 @@ function formatNumber(value: number) {
 export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [globalFilter, setGlobalFilter] = useState("");
+	const [pagination, setPagination] = useState({
+		pageIndex: 0,
+		pageSize: 10,
+	});
 
 	const columns = useMemo<ColumnDef<ApiKeyRow>[]>(
 		() => [
@@ -100,12 +114,15 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 		state: {
 			sorting,
 			globalFilter,
+			pagination,
 		},
 		onSortingChange: setSorting,
 		onGlobalFilterChange: setGlobalFilter,
+		onPaginationChange: setPagination,
 		getCoreRowModel: getCoreRowModel(),
 		getSortedRowModel: getSortedRowModel(),
 		getFilteredRowModel: getFilteredRowModel(),
+		getPaginationRowModel: getPaginationRowModel(),
 		globalFilterFn: (row, _columnId, filterValue) => {
 			const search = String(filterValue).toLowerCase().trim();
 			if (!search) return true;
@@ -123,6 +140,14 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 		},
 	});
 
+	useEffect(() => {
+		setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+	}, [globalFilter, data.length]);
+
+	const totalRows = table.getFilteredRowModel().rows.length;
+	const startRow = totalRows === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1;
+	const endRow = Math.min(totalRows, (pagination.pageIndex + 1) * pagination.pageSize);
+
 	return (
 		<div className="space-y-4">
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -134,8 +159,7 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 						className="max-w-sm"
 					/>
 					<span className="text-sm text-muted-foreground">
-						{table.getFilteredRowModel().rows.length} key
-						{table.getFilteredRowModel().rows.length === 1 ? "" : "s"}
+						{totalRows} key{totalRows === 1 ? "" : "s"}
 					</span>
 				</div>
 				{globalFilter ? (
@@ -145,15 +169,15 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 					</Button>
 				) : null}
 			</div>
-			<div className="overflow-x-auto rounded-lg border border-border">
-				<table className="min-w-full border-separate border-spacing-0 text-sm">
-					<thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+			<div className="rounded-lg border border-border">
+				<Table className="min-w-full border-separate border-spacing-0 text-sm">
+					<TableHeader className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
 						{table.getHeaderGroups().map((headerGroup) => (
-							<tr key={headerGroup.id}>
+							<TableRow key={headerGroup.id}>
 								{headerGroup.headers.map((header) => {
 									const sorted = header.column.getIsSorted();
 									return (
-										<th
+										<TableHead
 											key={header.id}
 											className="border-b border-border px-4 py-3 text-left"
 										>
@@ -176,34 +200,99 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 													)}
 												</button>
 											)}
-										</th>
+										</TableHead>
 									);
 								})}
-							</tr>
+							</TableRow>
 						))}
-					</thead>
-					<tbody>
+					</TableHeader>
+					<TableBody>
 						{table.getRowModel().rows.map((row) => (
-							<tr key={row.id} className="hover:bg-muted/40">
+							<TableRow key={row.id} className="hover:bg-muted/40">
 								{row.getVisibleCells().map((cell) => (
-									<td key={cell.id} className="border-b border-border px-4 py-3">
+									<TableCell
+										key={cell.id}
+										className="border-b border-border px-4 py-3"
+									>
 										{flexRender(cell.column.columnDef.cell, cell.getContext())}
-									</td>
+									</TableCell>
 								))}
-							</tr>
+							</TableRow>
 						))}
 						{table.getRowModel().rows.length === 0 ? (
-							<tr>
-								<td
+							<TableRow>
+								<TableCell
 									colSpan={columns.length}
 									className="px-4 py-8 text-center text-sm text-muted-foreground"
 								>
 									No API keys match this filter.
-								</td>
-							</tr>
+								</TableCell>
+							</TableRow>
 						) : null}
-					</tbody>
-				</table>
+					</TableBody>
+				</Table>
+				<div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+					<div className="flex items-center gap-2 text-xs text-muted-foreground">
+						<span>Rows per page</span>
+						<NativeSelect
+							value={String(pagination.pageSize)}
+							onChange={(event) =>
+								setPagination((prev) => ({
+									...prev,
+									pageSize: Number(event.target.value),
+									pageIndex: 0,
+								}))
+							}
+							className="w-[90px]"
+							size="sm"
+						>
+							{[10, 20, 50].map((size) => (
+								<NativeSelectOption key={size} value={String(size)}>
+									{size}
+								</NativeSelectOption>
+							))}
+						</NativeSelect>
+					</div>
+					<div className="flex items-center gap-3">
+						<span className="text-xs text-muted-foreground">
+							{startRow}-{endRow} of {totalRows}
+						</span>
+						<div className="flex items-center gap-1">
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => table.setPageIndex(0)}
+								disabled={!table.getCanPreviousPage()}
+							>
+								First
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => table.previousPage()}
+								disabled={!table.getCanPreviousPage()}
+							>
+								Prev
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => table.nextPage()}
+								disabled={!table.getCanNextPage()}
+							>
+								Next
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+								disabled={!table.getCanNextPage()}
+							>
+								Last
+							</Button>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 	);

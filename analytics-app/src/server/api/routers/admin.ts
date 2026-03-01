@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { apikeys, costs, models, requests, users } from "~/server/db/schema";
+import { costUnitOptions } from "~/lib/costs";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 	if (!ctx.session.user.isAdmin) {
@@ -22,7 +23,7 @@ const costInput = z.object({
 	price: z.number().int().nonnegative(),
 	validFrom: z.string().trim().min(1).max(32).optional(),
 	tokenType: z.string().trim().min(1).max(255),
-	unitOfMessure: z.string().trim().max(255).optional().nullable(),
+	unitOfMessure: z.enum(costUnitOptions).optional().nullable(),
 	isRegional: z.boolean(),
 	backendName: z.string().trim().min(1).max(255),
 	currency: z.string().trim().length(3).optional().nullable(),
