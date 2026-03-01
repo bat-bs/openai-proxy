@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -185,35 +184,6 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	return apikeys, nil
 }
 
-type Costs struct {
-	ModelName     string
-	RetailPrice   int
-	TokenType     string
-	UnitOfMeasure string
-	IsRegional    bool
-	BackendName   string // currently only azure
-	Currency      string
-	RequestTime   time.Time
-}
-
-func (d *Database) WriteCosts(carray []*Costs) error {
-	for _, c := range carray {
-		_, err := d.db.Exec(`
-		INSERT INTO costs
-		  (model,price,token_type,unit_of_messure,is_regional,backend_name,currency)
-		VALUES
-		  ($1, $2, $3, $4, $5, $6, $7)`, c.ModelName, c.RetailPrice, c.TokenType, c.UnitOfMeasure, c.IsRegional, c.BackendName, c.Currency)
-		if !strings.Contains(fmt.Sprintf("%s", err), "SQLSTATE 23505") {
-			log.Println(err)
-		}
-		if err == nil {
-			log.Printf("%s-costs: Wrote %s-Costs (%v) for Model %s to db. Unit: %s", c.BackendName, c.TokenType, c.RetailPrice, c.ModelName, c.UnitOfMeasure)
-		}
-	}
-	log.Println("Azure: Collecting Prices Done!")
-	return nil
-}
-
 func (d *Database) LookupModels() []string {
 	var models []string
 	rows, err := d.db.Query(`select model from requests group by model`)
@@ -277,23 +247,6 @@ type RequestSummary struct {
 	CacheRatioPercent     float64
 }
 
-func (d *Database) LookupCosts(model string) (carray []Costs) {
-	rows, err := d.db.Query("select * from costs where model = $1", model)
-	if err != nil {
-		return nil
-	}
-
-	var c Costs
-	for rows.Next() {
-		if err := rows.Scan(&c.ModelName, &c.RetailPrice, &c.RequestTime, &c.TokenType, &c.UnitOfMeasure, &c.IsRegional, &c.BackendName, &c.Currency); err != nil {
-			log.Println("DB Error for looking up costs: ", err)
-			return carray
-		}
-		carray = append(carray, c)
-	}
-	return carray
-}
-
 // used to check if cache has to be updated
 func (d *Database) LookupApiKeyUserStatsRows(uid string, kind string) (int, error) {
 	// handle "user" view for admintable and "apiKey" view for usertable
@@ -324,7 +277,7 @@ func GetFilterTruncMap() map[string]string {
 	}
 }
 
-func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string, overwriteDateTrunc bool) ([]RequestSummary, error) {
+func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string) ([]RequestSummary, error) {
 
 	// build sql condition based on filter
 	var condition string
@@ -353,11 +306,7 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string,
 		log.Println("Filter did not match", filter)
 	}
 
-	// Overwrite Date Trunc if Money as a unit is selected, to calculate costs based of the model costs of the day
 	dateTrunc := GetFilterTruncMap()[filter]
-	if overwriteDateTrunc && dateTrunc != "hour" {
-		dateTrunc = "day"
-	}
 
 	// handle "user" view for admintable and "apiKey" view for usertable
 	if kind == "user" {
