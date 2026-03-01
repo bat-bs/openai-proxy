@@ -1,6 +1,6 @@
 POST http://localhost:8082/api/v1/chat/completions
 Content-Type: application/json
-Authorization: Bearer <your-local-testing-token>
+Authorization: Bearer 2XMGTX3N2MQJ4WBVXY2UQ6GA6DFB6DVF
 
     {
       "model": "gpt-4o",
@@ -16,7 +16,7 @@ Authorization: Bearer <your-local-testing-token>
 ###
 POST http://localhost:8082/api/v1/responses
 Content-Type: application/json
-Authorization: Bearer <your-local-testing-token>
+Authorization: Bearer 2XMGTX3N2MQJ4WBVXY2UQ6GA6DFB6DVF
 
 {
   "model": "gpt-4o",

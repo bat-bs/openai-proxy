@@ -8,6 +8,7 @@ import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { apikeys, requests, users } from "~/server/db/schema";
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const DEFAULT_AIAPI = "openai";
 
 function base32Encode(bytes: Uint8Array) {
 	let output = "";
@@ -73,7 +74,6 @@ export const apiKeyRouter = createTRPCRouter({
 	createApiKey: protectedProcedure
 		.input(
 			z.object({
-				aiapi: z.string().trim().min(1).max(255),
 				description: z.string().trim().max(255).optional(),
 			})
 		)
@@ -96,7 +96,7 @@ export const apiKeyRouter = createTRPCRouter({
 				uuid: id,
 				apikey: hashed,
 				owner,
-				aiapi: input.aiapi,
+				aiapi: DEFAULT_AIAPI,
 				description: input.description?.trim() || null,
 			});
 
