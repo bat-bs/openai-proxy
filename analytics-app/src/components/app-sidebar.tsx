@@ -38,7 +38,7 @@ export async function AppSidebar() {
                             )}
                             <div className="min-w-0 flex-1">
                                 <div className="truncate text-xs font-medium">
-                                    {session.user.name ?? "User"}
+                                    {session.user.name ?? "Benutzer"}
                                 </div>
                                 {session.user.email ? (
                                     <div className="truncate text-[10px] text-muted-foreground">
@@ -53,7 +53,7 @@ export async function AppSidebar() {
                                 className="flex w-full items-center gap-2 rounded-none px-2 py-1.5 text-left hover:bg-muted"
                             >
                                 <LogOut className="h-4 w-4" />
-                                <span>Logout</span>
+                                <span>Abmelden</span>
                             </Link>
                         </div>
                     </details>
@@ -62,7 +62,7 @@ export async function AppSidebar() {
                         className="w-full rounded-none p-2 text-xs hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                         href="/api/auth/signin"
                     >
-                        Sign in
+                        Anmelden
                     </Link>
                 )}
             </SidebarFooter>

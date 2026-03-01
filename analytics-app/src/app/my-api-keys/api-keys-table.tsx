@@ -64,11 +64,11 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 		() => [
 			{
 				accessorKey: "id",
-				header: "API Key ID",
+				header: "API-Key-ID",
 			},
 			{
 				accessorKey: "description",
-				header: "Description",
+				header: "Beschreibung",
 				cell: ({ getValue }) => {
 					const value = getValue<string | null>();
 					return value?.trim() ? value : "—";
@@ -76,25 +76,25 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 			},
 			{
 				accessorKey: "inputTokens",
-				header: "Used Input Tokens",
+				header: "Verwendete Input-Tokens",
 				cell: ({ getValue }) => formatNumber(getValue<number>()),
 				sortingFn: "basic",
 			},
 			{
 				accessorKey: "cachedInputTokens",
-				header: "Used Input Cache Tokens",
+				header: "Verwendete Input-Cache-Tokens",
 				cell: ({ getValue }) => formatNumber(getValue<number>()),
 				sortingFn: "basic",
 			},
 			{
 				accessorKey: "outputTokens",
-				header: "Used Output Tokens",
+				header: "Verwendete Output-Tokens",
 				cell: ({ getValue }) => formatNumber(getValue<number>()),
 				sortingFn: "basic",
 			},
 			{
 				accessorKey: "createdAt",
-				header: "Creation Date",
+				header: "Erstellungsdatum",
 				cell: ({ getValue }) => formatDate(getValue<string | null>()),
 				sortingFn: (rowA, rowB, columnId) => {
 					const a = rowA.getValue<string | null>(columnId);
@@ -153,19 +153,19 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<div className="flex flex-1 items-center gap-3">
 					<Input
-						placeholder="Filter by id, description, or tokens"
+						placeholder="Nach ID, Beschreibung oder Tokens filtern"
 						value={globalFilter}
 						onChange={(event) => setGlobalFilter(event.target.value)}
 						className="max-w-sm"
 					/>
 					<span className="text-sm text-muted-foreground">
-						{totalRows} key{totalRows === 1 ? "" : "s"}
+						{totalRows} API-Key{totalRows === 1 ? "" : "s"}
 					</span>
 				</div>
 				{globalFilter ? (
 					<Button variant="outline" size="sm" onClick={() => setGlobalFilter("")}
 					>
-						Clear
+						Zurücksetzen
 					</Button>
 				) : null}
 			</div>
@@ -225,7 +225,7 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 									colSpan={columns.length}
 									className="px-4 py-8 text-center text-sm text-muted-foreground"
 								>
-									No API keys match this filter.
+									Keine API-Keys passen zu diesem Filter.
 								</TableCell>
 							</TableRow>
 						) : null}
@@ -233,7 +233,7 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 				</Table>
 				<div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
 					<div className="flex items-center gap-2 text-xs text-muted-foreground">
-						<span>Rows per page</span>
+						<span>Zeilen pro Seite</span>
 						<NativeSelect
 							value={String(pagination.pageSize)}
 							onChange={(event) =>
@@ -255,45 +255,45 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 					</div>
 					<div className="flex items-center gap-3">
 						<span className="text-xs text-muted-foreground">
-							{startRow}-{endRow} of {totalRows}
+							{startRow}-{endRow} von {totalRows}
 						</span>
-						<div className="flex items-center gap-1">
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => table.setPageIndex(0)}
-								disabled={!table.getCanPreviousPage()}
-							>
-								First
-							</Button>
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => table.previousPage()}
-								disabled={!table.getCanPreviousPage()}
-							>
-								Prev
-							</Button>
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => table.nextPage()}
-								disabled={!table.getCanNextPage()}
-							>
-								Next
-							</Button>
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-								disabled={!table.getCanNextPage()}
-							>
-								Last
-							</Button>
+							<div className="flex items-center gap-1">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => table.setPageIndex(0)}
+									disabled={!table.getCanPreviousPage()}
+								>
+									Erste
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => table.previousPage()}
+									disabled={!table.getCanPreviousPage()}
+								>
+									Zurück
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => table.nextPage()}
+									disabled={!table.getCanNextPage()}
+								>
+									Weiter
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+									disabled={!table.getCanNextPage()}
+								>
+									Letzte
+								</Button>
+							</div>
 						</div>
 					</div>
 				</div>
-			</div>
 		</div>
 	);
 }

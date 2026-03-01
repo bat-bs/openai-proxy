@@ -159,7 +159,7 @@ function CostEditDialog({
 				<DialogHeader>
 					<DialogTitle>Kosten anpassen</DialogTitle>
 					<DialogDescription>
-						Update pricing erstellt einen neuen Eintrag mit dem heutigen Datum.
+						Preisaktualisierung erstellt einen neuen Eintrag mit dem heutigen Datum.
 					</DialogDescription>
 				</DialogHeader>
 				<div className="grid gap-3">
@@ -169,12 +169,12 @@ function CostEditDialog({
 						onChange={(event) => setMode(event.target.value as "update" | "modify")}
 						className="h-9 rounded-md border border-border bg-background px-3 text-sm"
 					>
-						<option value="update">Update pricing (neuer Eintrag)</option>
-						<option value="modify">Modify pricing (bestehender Eintrag)</option>
+						<option value="update">Preisaktualisierung (neuer Eintrag)</option>
+						<option value="modify">Preisänderung (bestehender Eintrag)</option>
 					</select>
 					<div className="grid gap-3 md:grid-cols-2">
 						<div className="flex flex-col gap-1">
-							<label className="text-xs font-medium text-muted-foreground">Model</label>
+							<label className="text-xs font-medium text-muted-foreground">Modell</label>
 							<Input
 								list="costs-models"
 								value={model}
@@ -183,7 +183,7 @@ function CostEditDialog({
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="text-xs font-medium text-muted-foreground">Token type</label>
+							<label className="text-xs font-medium text-muted-foreground">Token-Typ</label>
 							<Input
 								value={tokenType}
 								onChange={(event) => setTokenType(event.target.value)}
@@ -258,7 +258,7 @@ function CostEditDialog({
 								htmlFor={`costs-regional-${row.model}-${row.tokenType}-${row.price}`}
 								className="text-sm"
 							>
-								Regional pricing
+								Regionale Preisgestaltung
 							</label>
 						</div>
 					</div>
@@ -361,11 +361,11 @@ export function CostsTable({
 		() => [
 			{
 				accessorKey: "model",
-				header: "Model",
+				header: "Modell",
 			},
 			{
 				accessorKey: "tokenType",
-				header: "Token",
+				header: "Token-Typ",
 			},
 			{
 				accessorKey: "price",
@@ -463,7 +463,7 @@ export function CostsTable({
 						onChange={(event) => setGlobalFilter(event.target.value)}
 					/>
 					<Input
-						placeholder="Model"
+						placeholder="Modell"
 						value={modelFilter}
 						onChange={(event) => setModelFilter(event.target.value)}
 					/>
@@ -473,7 +473,7 @@ export function CostsTable({
 						onChange={(event) => setBackendFilter(event.target.value)}
 					/>
 					<Input
-						placeholder="Token type"
+						placeholder="Token-Typ"
 						value={tokenFilter}
 						onChange={(event) => setTokenFilter(event.target.value)}
 					/>
@@ -575,7 +575,7 @@ export function CostsTable({
 				</Table>
 				<div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
 					<div className="flex items-center gap-2 text-xs text-muted-foreground">
-						<span>Rows per page</span>
+						<span>Zeilen pro Seite</span>
 						<NativeSelect
 							value={String(pagination.pageSize)}
 							onChange={(event) =>
@@ -597,7 +597,7 @@ export function CostsTable({
 					</div>
 					<div className="flex items-center gap-3">
 						<span className="text-xs text-muted-foreground">
-							{startRow}-{endRow} of {totalRows}
+							{startRow}-{endRow} von {totalRows}
 						</span>
 						<div className="flex items-center gap-1">
 							<Button
@@ -606,7 +606,7 @@ export function CostsTable({
 								onClick={() => table.setPageIndex(0)}
 								disabled={!table.getCanPreviousPage()}
 							>
-								First
+								Erste
 							</Button>
 							<Button
 								variant="outline"
@@ -614,7 +614,7 @@ export function CostsTable({
 								onClick={() => table.previousPage()}
 								disabled={!table.getCanPreviousPage()}
 							>
-								Prev
+								Zurück
 							</Button>
 							<Button
 								variant="outline"
@@ -622,7 +622,7 @@ export function CostsTable({
 								onClick={() => table.nextPage()}
 								disabled={!table.getCanNextPage()}
 							>
-								Next
+								Weiter
 							</Button>
 							<Button
 								variant="outline"
@@ -630,7 +630,7 @@ export function CostsTable({
 								onClick={() => table.setPageIndex(table.getPageCount() - 1)}
 								disabled={!table.getCanNextPage()}
 							>
-								Last
+								Letzte
 							</Button>
 						</div>
 					</div>

@@ -48,7 +48,7 @@ export function SiteHeader() {
                         variant="ghost"
                         size="sm"
                         onClick={toggleTheme}
-                        aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                        aria-label={isDark ? "Zum hellen Modus wechseln" : "Zum dunklen Modus wechseln"}
                     >
                         {isDark ? <SunIcon /> : <MoonIcon />}
                     </Button>

@@ -127,10 +127,10 @@ export function AdminUsageDashboard({
                 </div>
                 <div className="rounded-none border border-border bg-card p-6">
                     <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Tokens used
+                        Verbrauchte Tokens
                     </div>
                     <div className="mt-2 text-3xl font-semibold">
-                        Tokens used: {numberFormatter.format(stats.totalTokens)}
+                        Verbrauchte Tokens: {numberFormatter.format(stats.totalTokens)}
                     </div>
                 </div>
             </div>
@@ -138,7 +138,7 @@ export function AdminUsageDashboard({
             <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                 <div className="rounded-none border border-border bg-card p-4">
                     <div className="text-xs font-medium text-muted-foreground">
-                        Usage distribution by model
+                        Nutzungsverteilung nach Modell
                     </div>
                     <div className="mt-4">
                         {pieData.length ? (
@@ -162,7 +162,7 @@ export function AdminUsageDashboard({
                             </ChartContainer>
                         ) : (
                             <div className="text-xs text-muted-foreground">
-                                No usage data for this period.
+                                Keine Nutzungsdaten für diesen Zeitraum.
                             </div>
                         )}
                     </div>
@@ -170,26 +170,26 @@ export function AdminUsageDashboard({
 
                 <div className="rounded-none border border-border bg-card p-4">
                     <div className="text-xs font-medium text-muted-foreground">
-                        Usage by user
+                        Nutzung nach Benutzer
                     </div>
                     <div className="mt-4">
                         <Table className="border-collapse text-xs">
                             <TableHeader>
                                 <TableRow className="border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                                     <TableHead className="pb-2 pr-3 font-medium">
-                                        Username
+                                        Benutzername
                                     </TableHead>
                                     <TableHead className="pb-2 pr-3 font-medium">
-                                        Input tokens
+                                        Input-Tokens
                                     </TableHead>
                                     <TableHead className="pb-2 pr-3 font-medium">
-                                        Cached tokens
+                                        Cache-Tokens
                                     </TableHead>
                                     <TableHead className="pb-2 pr-3 font-medium">
-                                        Output tokens
+                                        Output-Tokens
                                     </TableHead>
                                     <TableHead className="pb-2 font-medium">
-                                        Last activity
+                                        Letzte Aktivität
                                     </TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -224,7 +224,7 @@ export function AdminUsageDashboard({
                                             colSpan={5}
                                             className="py-4 text-center text-muted-foreground"
                                         >
-                                            No users found.
+                                            Keine Benutzer gefunden.
                                         </TableCell>
                                     </TableRow>
                                 ) : null}
@@ -232,7 +232,7 @@ export function AdminUsageDashboard({
                         </Table>
                         <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                <span>Rows per page</span>
+                                <span>Zeilen pro Seite</span>
                                 <NativeSelect
                                     value={String(pageSize)}
                                     onChange={(event) => {
@@ -251,7 +251,7 @@ export function AdminUsageDashboard({
                             </div>
                             <div className="flex items-center gap-2">
                                 <span className="text-[11px] text-muted-foreground">
-                                    {startRow}-{endRow} of {totalUsers}
+                                    {startRow}-{endRow} von {totalUsers}
                                 </span>
                                 <div className="flex items-center gap-1">
                                     <Button
@@ -260,7 +260,7 @@ export function AdminUsageDashboard({
                                         onClick={() => setPageIndex(0)}
                                         disabled={clampedPageIndex === 0}
                                     >
-                                        First
+                                        Erste
                                     </Button>
                                     <Button
                                         variant="outline"
@@ -270,7 +270,7 @@ export function AdminUsageDashboard({
                                         }
                                         disabled={clampedPageIndex === 0}
                                     >
-                                        Prev
+                                        Zurück
                                     </Button>
                                     <Button
                                         variant="outline"
@@ -282,7 +282,7 @@ export function AdminUsageDashboard({
                                         }
                                         disabled={clampedPageIndex >= totalPages - 1}
                                     >
-                                        Next
+                                        Weiter
                                     </Button>
                                     <Button
                                         variant="outline"
@@ -290,7 +290,7 @@ export function AdminUsageDashboard({
                                         onClick={() => setPageIndex(totalPages - 1)}
                                         disabled={clampedPageIndex >= totalPages - 1}
                                     >
-                                        Last
+                                        Letzte
                                     </Button>
                                 </div>
                             </div>

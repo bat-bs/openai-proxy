@@ -98,7 +98,7 @@ export function CostsClient() {
 						</div>
 						<div className="grid gap-3 md:grid-cols-3">
 							<div className="flex flex-col gap-1">
-								<label className="text-xs font-medium text-muted-foreground">Model</label>
+								<label className="text-xs font-medium text-muted-foreground">Modell</label>
 								<Input
 									list="costs-models"
 									value={model}
@@ -107,7 +107,7 @@ export function CostsClient() {
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="text-xs font-medium text-muted-foreground">Token type</label>
+								<label className="text-xs font-medium text-muted-foreground">Token-Typ</label>
 								<Input
 									value={tokenType}
 									onChange={(event) => setTokenType(event.target.value)}
@@ -172,7 +172,7 @@ export function CostsClient() {
 									className="h-4 w-4 rounded border-border"
 								/>
 								<label htmlFor="isRegional" className="text-sm">
-									Regional pricing
+									Regionale Preisgestaltung
 								</label>
 							</div>
 						</div>

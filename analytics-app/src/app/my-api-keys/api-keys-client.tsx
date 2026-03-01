@@ -33,10 +33,10 @@ export function ApiKeysClient() {
 			setDescription("");
 			setCopied(false);
 			await utils.apiKey.getApiKeys.invalidate();
-			toast.success("API key created.");
+			toast.success("API-Key erstellt.");
 		},
 		onError: () => {
-			toast.error("Failed to create API key.");
+			toast.error("API-Key konnte nicht erstellt werden.");
 		},
 	});
 
@@ -44,9 +44,9 @@ export function ApiKeysClient() {
 		<div className="space-y-6">
 			<div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border p-4">
 				<div>
-					<h2 className="text-sm font-semibold">Create API key</h2>
+					<h2 className="text-sm font-semibold">API-Key erstellen</h2>
 					<p className="text-xs text-muted-foreground">
-						Generate a new key for your account.
+						Einen neuen Schlüssel für dein Konto erstellen.
 					</p>
 				</div>
 				<Dialog
@@ -62,27 +62,27 @@ export function ApiKeysClient() {
 						}
 					}}
 				>
-					<DialogTrigger render={<Button />}>Create API key</DialogTrigger>
+					<DialogTrigger render={<Button />}>API-Key erstellen</DialogTrigger>
 					<DialogContent>
 						<DialogHeader>
-							<DialogTitle>New API key</DialogTitle>
+							<DialogTitle>Neuer API-Key</DialogTitle>
 							<DialogDescription>
-								Add an optional description and generate a key.
+								Füge optional eine Beschreibung hinzu und erstelle den Schlüssel.
 							</DialogDescription>
 						</DialogHeader>
 						<div className="grid gap-3">
 							<Input
-								placeholder="Description (optional)"
+								placeholder="Beschreibung (optional)"
 								value={description}
 								onChange={(event) => setDescription(event.target.value)}
 							/>
 							{token ? (
 								<div className="space-y-2 rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-yellow-900">
 									<div className="text-xs font-semibold uppercase tracking-wide">
-										Warning
+										Warnung
 									</div>
 									<p className="text-sm">
-										This key will only be shown once. Store it securely now.
+										Dieser Schlüssel wird nur einmal angezeigt. Bitte jetzt sicher speichern.
 									</p>
 									<div className="grid gap-2">
 										<Input readOnly value={token} />
@@ -107,11 +107,11 @@ export function ApiKeysClient() {
 												}
 											}}
 										>
-											Copy token
+											Token kopieren
 										</Button>
 										{copied ? (
 											<span className="text-xs text-muted-foreground">
-												Copied.
+												Kopiert.
 											</span>
 										) : null}
 									</div>
@@ -128,11 +128,11 @@ export function ApiKeysClient() {
 										})
 									}
 								>
-									{createApiKey.isPending ? "Creating..." : "Create key"}
+									{createApiKey.isPending ? "Wird erstellt..." : "Schlüssel erstellen"}
 								</Button>
 								{createApiKey.error ? (
 									<span className="text-xs text-destructive">
-										Failed to create key. Try again.
+										Schlüssel konnte nicht erstellt werden. Bitte erneut versuchen.
 									</span>
 								) : null}
 							</div>
@@ -141,7 +141,7 @@ export function ApiKeysClient() {
 				</Dialog>
 			</div>
 			{isLoading ? (
-				<div className="text-sm text-muted-foreground">Loading keys...</div>
+				<div className="text-sm text-muted-foreground">Schlüssel werden geladen...</div>
 			) : (
 				<ApiKeysTable data={data} />
 			)}

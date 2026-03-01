@@ -17,7 +17,7 @@ export default async function Home() {
 			<main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
 				<div className="container flex flex-col items-center justify-center gap-12 px-4 py-16">
 					<h1 className="font-extrabold text-5xl tracking-tight sm:text-[5rem]">
-						Create <span className="text-[hsl(280,100%,70%)]">T3</span> App
+						Erstelle eine <span className="text-[hsl(280,100%,70%)]">T3</span>-App
 					</h1>
 					<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-8">
 						<Link
@@ -25,10 +25,10 @@ export default async function Home() {
 							href="https://create.t3.gg/en/usage/first-steps"
 							target="_blank"
 						>
-							<h3 className="font-bold text-2xl">First Steps →</h3>
+							<h3 className="font-bold text-2xl">Erste Schritte →</h3>
 							<div className="text-lg">
-								Just the basics - Everything you need to know to set up your
-								database and authentication.
+								Die Grundlagen – alles, was du zur Einrichtung von Datenbank
+								und Authentifizierung wissen musst.
 							</div>
 						</Link>
 						<Link
@@ -36,27 +36,27 @@ export default async function Home() {
 							href="https://create.t3.gg/en/introduction"
 							target="_blank"
 						>
-							<h3 className="font-bold text-2xl">Documentation →</h3>
+							<h3 className="font-bold text-2xl">Dokumentation →</h3>
 							<div className="text-lg">
-								Learn more about Create T3 App, the libraries it uses, and how
-								to deploy it.
+								Erfahre mehr über Create T3 App, die verwendeten Bibliotheken
+								und wie du es deployen kannst.
 							</div>
 						</Link>
 					</div>
 					<div className="flex flex-col items-center gap-2">
 						<p className="text-2xl text-white">
-							{hello ? hello.greeting : "Loading tRPC query..."}
+							{hello ? hello.greeting : "tRPC-Abfrage wird geladen..."}
 						</p>
 
 						<div className="flex flex-col items-center justify-center gap-4">
 							<p className="text-center text-2xl text-white">
-								{session && <span>Logged in as {session.user?.name}</span>}
+								{session && <span>Angemeldet als {session.user?.name}</span>}
 							</p>
 							<Link
 								className="rounded-full bg-white/10 px-10 py-3 font-semibold no-underline transition hover:bg-white/20"
 								href={session ? "/api/auth/signout" : "/api/auth/signin"}
 							>
-								{session ? "Sign out" : "Sign in"}
+								{session ? "Abmelden" : "Anmelden"}
 							</Link>
 						</div>
 					</div>
