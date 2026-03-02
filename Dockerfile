@@ -51,8 +51,6 @@ WORKDIR /app
 COPY --from=builder /app/server /app/server
 COPY db/schema.sql db/schema.sql
 COPY db/migrations/* db/migrations
-COPY public public
-COPY templates templates
 RUN chmod +x server
 
 CMD ["/app/server"]
