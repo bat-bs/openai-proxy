@@ -5,7 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { apikeys, requests, users } from "~/server/db/schema";
+import { apikeys, costs, requests, users } from "~/server/db/schema";
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const DEFAULT_AIAPI = "openai";
@@ -40,10 +40,11 @@ export const apiKeyRouter = createTRPCRouter({
 		const userId = ctx.session.user.id;
 		if (!userId) return [];
 
-		const rows = await ctx.db
+		const usageRows = await ctx.db
 			.select({
 				id: apikeys.uuid,
 				description: apikeys.description,
+				model: requests.model,
 				inputTokens:
 					sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
 						"inputTokens"
@@ -60,15 +61,183 @@ export const apiKeyRouter = createTRPCRouter({
 			.innerJoin(users, eq(apikeys.owner, users.id))
 			.leftJoin(requests, eq(apikeys.uuid, requests.apiKeyId))
 			.where(eq(users.id, userId))
-			.groupBy(apikeys.uuid, apikeys.description);
+			.groupBy(apikeys.uuid, apikeys.description, requests.model);
 
-		return rows.map((row) => ({
+		const costRows = await ctx.db
+			.select({
+				model: costs.model,
+				price: costs.price,
+				validFrom: costs.validFrom,
+				tokenType: costs.tokenType,
+				unitOfMessure: costs.unitOfMessure,
+				currency: costs.currency,
+			})
+			.from(costs);
+
+		const normalize = (value: string | null | undefined) =>
+			(value ?? "").trim().toLowerCase();
+
+		const costIndex = new Map<string, Map<string, {
+			price: number;
+			validFrom: string | null;
+			unit: "1M" | "1K" | null;
+			currency: string | null;
+		}>>();
+
+		for (const row of costRows) {
+			const modelKey = normalize(row.model);
+			const tokenKey = normalize(row.tokenType);
+			if (!modelKey || !tokenKey) continue;
+			const modelMap = costIndex.get(modelKey) ?? new Map();
+			const existing = modelMap.get(tokenKey);
+			const currentValidFrom = row.validFrom ? new Date(row.validFrom).getTime() : 0;
+			const existingValidFrom = existing?.validFrom
+				? new Date(existing.validFrom).getTime()
+				: 0;
+			if (!existing || currentValidFrom >= existingValidFrom) {
+				modelMap.set(tokenKey, {
+					price: Number(row.price ?? 0),
+					validFrom: row.validFrom ?? null,
+					unit: (row.unitOfMessure ?? null) as "1M" | "1K" | null,
+					currency: row.currency ? row.currency.trim().toUpperCase() : null,
+				});
+			}
+			costIndex.set(modelKey, modelMap);
+		}
+
+		const tokenAliases = {
+			input: ["input", "prompt", "input_tokens", "prompt_tokens"],
+			cached: ["cached_input", "cached", "cache", "input_cached", "cached_input_tokens"],
+			output: ["output", "completion", "output_tokens", "completion_tokens"],
+		};
+
+		const unitDivisor = (unit: "1M" | "1K" | null) => {
+			if (unit === "1K") return 1_000;
+			return 1_000_000;
+		};
+
+		const calcTokenCost = (
+			model: string,
+			tokens: number,
+			aliases: string[]
+		) => {
+			if (tokens <= 0) return { cost: 0, missing: false };
+			const modelKey = normalize(model);
+			const modelMap = costIndex.get(modelKey);
+			if (!modelMap) return { cost: 0, missing: true };
+			let entry:
+				| {
+						price: number;
+						validFrom: string | null;
+						unit: "1M" | "1K" | null;
+						currency: string | null;
+				  }
+				| undefined;
+			for (const alias of aliases) {
+				entry = modelMap.get(alias);
+				if (entry) break;
+			}
+			if (!entry) return { cost: 0, missing: true };
+			return {
+				cost: (tokens / unitDivisor(entry.unit)) * entry.price,
+				missing: false,
+				currency: entry.currency,
+			};
+		};
+
+		const byKey = new Map<string, {
+			id: string;
+			description: string | null;
+			inputTokens: number;
+			cachedInputTokens: number;
+			outputTokens: number;
+			createdAt: string | null;
+			models: Array<{
+				model: string;
+				inputTokens: number;
+				cachedInputTokens: number;
+				outputTokens: number;
+				cost: number | null;
+				currency: string | null;
+			}>;
+			cost: number | null;
+			currency: string | null;
+		}>();
+
+		for (const row of usageRows) {
+			const id = row.id;
+			const entry = byKey.get(id) ?? {
+				id,
+				description: row.description,
+				inputTokens: 0,
+				cachedInputTokens: 0,
+				outputTokens: 0,
+				createdAt: row.createdAt ?? null,
+				models: [],
+				cost: 0,
+				currency: null,
+			};
+
+			const inputTokens = Number(row.inputTokens ?? 0);
+			const cachedInputTokens = Number(row.cachedInputTokens ?? 0);
+			const outputTokens = Number(row.outputTokens ?? 0);
+
+			entry.inputTokens += inputTokens;
+			entry.cachedInputTokens += cachedInputTokens;
+			entry.outputTokens += outputTokens;
+			if (!entry.createdAt) entry.createdAt = row.createdAt ?? null;
+
+			const model = row.model ?? "Unknown";
+			if (inputTokens + cachedInputTokens + outputTokens > 0) {
+				const inputCost = calcTokenCost(model, inputTokens, tokenAliases.input);
+				const cachedCost = calcTokenCost(model, cachedInputTokens, tokenAliases.cached);
+				const outputCost = calcTokenCost(model, outputTokens, tokenAliases.output);
+				const modelMissing = inputCost.missing || cachedCost.missing || outputCost.missing;
+				const currencies = [inputCost.currency, cachedCost.currency, outputCost.currency].filter(
+					(value): value is string => Boolean(value)
+				);
+				const modelCurrency =
+					currencies.length > 0 && currencies.every((value) => value === currencies[0])
+						? currencies[0]
+						: null;
+				const modelCost = modelMissing
+					? null
+					: inputCost.cost + cachedCost.cost + outputCost.cost;
+
+				entry.models.push({
+					model,
+					inputTokens,
+					cachedInputTokens,
+					outputTokens,
+					cost: modelCost,
+					currency: modelCost === null ? null : modelCurrency,
+				});
+
+				if (entry.cost !== null) {
+					entry.cost = modelCost === null ? null : entry.cost + modelCost;
+					if (entry.cost === null) {
+						entry.currency = null;
+					} else if (entry.currency === null) {
+						entry.currency = modelCurrency;
+					} else if (modelCurrency && entry.currency !== modelCurrency) {
+						entry.currency = null;
+					}
+				}
+			}
+
+			byKey.set(id, entry);
+		}
+
+		return Array.from(byKey.values()).map((row) => ({
 			id: row.id,
 			description: row.description,
-			inputTokens: Number(row.inputTokens ?? 0),
-			cachedInputTokens: Number(row.cachedInputTokens ?? 0),
-			outputTokens: Number(row.outputTokens ?? 0),
+			inputTokens: row.inputTokens,
+			cachedInputTokens: row.cachedInputTokens,
+			outputTokens: row.outputTokens,
 			createdAt: row.createdAt ?? null,
+			cost: row.cost,
+			currency: row.currency ?? null,
+			models: row.models.sort((a, b) => a.model.localeCompare(b.model)),
 		}));
 	}),
 	createApiKey: protectedProcedure

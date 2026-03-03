@@ -59,7 +59,26 @@ export function ApiKeysClient() {
 					<div className="text-sm text-muted-foreground">Schlüssel werden geladen...</div>
 				) : (
 					<ApiKeysTable
-						data={data}
+						data={data.map((row) => ({
+							kind: "key",
+							id: row.id,
+							description: row.description,
+							inputTokens: row.inputTokens,
+							cachedInputTokens: row.cachedInputTokens,
+							outputTokens: row.outputTokens,
+							createdAt: row.createdAt,
+							cost: row.cost ?? null,
+							currency: row.currency ?? null,
+							subRows: row.models.map((modelRow) => ({
+								kind: "model",
+								model: modelRow.model,
+								inputTokens: modelRow.inputTokens,
+								cachedInputTokens: modelRow.cachedInputTokens,
+								outputTokens: modelRow.outputTokens,
+								cost: modelRow.cost ?? null,
+								currency: modelRow.currency ?? null,
+							})),
+						}))}
 						action={<DialogTrigger render={<Button />}>API-Key erstellen</DialogTrigger>}
 					/>
 				)}

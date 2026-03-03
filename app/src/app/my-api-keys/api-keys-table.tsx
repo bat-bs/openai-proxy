@@ -5,9 +5,11 @@ import {
 	type ColumnDef,
 	flexRender,
 	getCoreRowModel,
+	getExpandedRowModel,
 	getFilteredRowModel,
 	getPaginationRowModel,
 	getSortedRowModel,
+	type ExpandedState,
 	type SortingState,
 	useReactTable,
 } from "@tanstack/react-table";
@@ -25,16 +27,25 @@ import {
 	TableRow,
 } from "~/components/ui/table";
 
-export type ApiKeyRow = {
-	id: string;
-	description: string | null;
+export type ApiKeyTableRow = {
+	kind: "key" | "model";
+	id?: string;
+	description?: string | null;
+	model?: string | null;
 	inputTokens: number;
 	cachedInputTokens: number;
 	outputTokens: number;
-	createdAt: string | null;
+	createdAt?: string | null;
+	cost: number | null;
+	currency?: string | null;
+	subRows?: ApiKeyTableRow[];
 };
 
 const numberFormatter = new Intl.NumberFormat("en-US");
+const costFormatter = new Intl.NumberFormat("en-US", {
+	minimumFractionDigits: 2,
+	maximumFractionDigits: 2,
+});
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
 	year: "numeric",
 	month: "short",
@@ -52,30 +63,63 @@ function formatNumber(value: number) {
 	return numberFormatter.format(value ?? 0);
 }
 
+function formatCost(value: number | null, currency?: string | null) {
+	if (value === null || Number.isNaN(value)) return "—";
+	const symbol = currency === "EUR" ? "€" : currency === "USD" ? "$" : "";
+	return `${costFormatter.format(value)}${symbol}`;
+}
+
 export function ApiKeysTable({
 	data,
 	action,
 }: {
-	data: ApiKeyRow[];
+	data: ApiKeyTableRow[];
 	action?: ReactNode;
 }) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [globalFilter, setGlobalFilter] = useState("");
+	const [expanded, setExpanded] = useState<ExpandedState>({});
 	const [pagination, setPagination] = useState({
 		pageIndex: 0,
 		pageSize: 10,
 	});
 
-	const columns = useMemo<ColumnDef<ApiKeyRow>[]>(
+	const columns = useMemo<ColumnDef<ApiKeyTableRow>[]>(
 		() => [
 			{
-				accessorKey: "id",
-				header: "API-Key-ID",
+				id: "expander",
+				header: "",
+				enableSorting: false,
+				cell: ({ row }) =>
+					row.getCanExpand() ? (
+						<button
+							type="button"
+							aria-label={row.getIsExpanded() ? "Einklappen" : "Ausklappen"}
+							onClick={row.getToggleExpandedHandler()}
+							className="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-muted-foreground transition hover:bg-muted"
+						>
+							<ChevronDown
+								className={`h-4 w-4 transition-transform ${
+									row.getIsExpanded() ? "rotate-180" : ""
+								}`}
+							/>
+						</button>
+					) : null,
 			},
 			{
 				accessorKey: "description",
-				header: "Beschreibung",
-				cell: ({ getValue }) => {
+				header: "Beschreibung / Modell",
+				cell: ({ row, getValue }) => {
+					if (row.original.kind === "model") {
+						return (
+							<span className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+								<span className="text-[0.7rem]">Modell</span>
+								<span className="text-sm font-semibold text-foreground">
+									{row.original.model ?? "Unbekannt"}
+								</span>
+							</span>
+						);
+					}
 					const value = getValue<string | null>();
 					return value?.trim() ? value : "—";
 				},
@@ -99,6 +143,19 @@ export function ApiKeysTable({
 				sortingFn: "basic",
 			},
 			{
+				accessorKey: "cost",
+				header: "Kosten",
+				cell: ({ row, getValue }) =>
+					row.original.kind === "model"
+						? formatCost(getValue<number | null>(), row.original.currency)
+						: formatCost(getValue<number | null>(), row.original.currency),
+				sortingFn: (rowA, rowB, columnId) => {
+					const a = rowA.getValue<number | null>(columnId) ?? 0;
+					const b = rowB.getValue<number | null>(columnId) ?? 0;
+					return a === b ? 0 : a > b ? 1 : -1;
+				},
+			},
+			{
 				accessorKey: "createdAt",
 				header: "Erstellungsdatum",
 				cell: ({ getValue }) => formatDate(getValue<string | null>()),
@@ -109,6 +166,12 @@ export function ApiKeysTable({
 					const bTime = b ? new Date(b).getTime() : 0;
 					return aTime === bTime ? 0 : aTime > bTime ? 1 : -1;
 				},
+			},
+			{
+				accessorKey: "id",
+				header: "API-Key-ID",
+				cell: ({ row, getValue }) =>
+					row.original.kind === "model" ? "—" : (getValue<string>() ?? "—"),
 			},
 		],
 		[]
@@ -121,24 +184,31 @@ export function ApiKeysTable({
 			sorting,
 			globalFilter,
 			pagination,
+			expanded,
 		},
 		onSortingChange: setSorting,
 		onGlobalFilterChange: setGlobalFilter,
 		onPaginationChange: setPagination,
+		onExpandedChange: setExpanded,
 		getCoreRowModel: getCoreRowModel(),
+		getExpandedRowModel: getExpandedRowModel(),
 		getSortedRowModel: getSortedRowModel(),
 		getFilteredRowModel: getFilteredRowModel(),
 		getPaginationRowModel: getPaginationRowModel(),
+		getRowCanExpand: (row) => (row.original.subRows?.length ?? 0) > 0,
+		getSubRows: (row) => row.subRows,
 		globalFilterFn: (row, _columnId, filterValue) => {
 			const search = String(filterValue).toLowerCase().trim();
 			if (!search) return true;
-			const createdLabel = formatDate(row.original.createdAt);
+			const createdLabel = formatDate(row.original.createdAt ?? null);
 			return [
-				row.original.id,
+				row.original.id ?? "",
 				row.original.description ?? "",
+				row.original.model ?? "",
 				row.original.inputTokens,
 				row.original.cachedInputTokens,
 				row.original.outputTokens,
+				row.original.cost ?? "",
 				createdLabel,
 			]
 				.map((value) => String(value).toLowerCase())
@@ -190,7 +260,7 @@ export function ApiKeysTable({
 											key={header.id}
 											className="border-b border-border px-4 py-3 text-left"
 										>
-											{header.isPlaceholder ? null : (
+											{header.isPlaceholder ? null : header.column.getCanSort() ? (
 												<button
 													type="button"
 													className="inline-flex items-center gap-1"
@@ -208,6 +278,8 @@ export function ApiKeysTable({
 														<ChevronsUpDown className="h-3 w-3 text-muted-foreground" />
 													)}
 												</button>
+											) : (
+												flexRender(header.column.columnDef.header, header.getContext())
 											)}
 										</TableHead>
 									);
@@ -217,11 +289,18 @@ export function ApiKeysTable({
 					</TableHeader>
 					<TableBody>
 						{table.getRowModel().rows.map((row) => (
-							<TableRow key={row.id} className="hover:bg-muted/40">
+							<TableRow
+								key={row.id}
+								className={`hover:bg-muted/40 ${row.depth > 0 ? "bg-muted/20" : ""}`}
+							>
 								{row.getVisibleCells().map((cell) => (
 									<TableCell
 										key={cell.id}
-										className="border-b border-border px-4 py-3"
+										className={`border-b border-border px-4 py-3 ${
+											cell.column.id === "description" && row.depth > 0
+												? "pl-10"
+												: ""
+										}`}
 									>
 										{flexRender(cell.column.columnDef.cell, cell.getContext())}
 									</TableCell>
