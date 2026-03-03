@@ -1,23 +1,26 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
 	type ColumnDef,
+	type ExpandedState,
 	flexRender,
 	getCoreRowModel,
 	getExpandedRowModel,
 	getFilteredRowModel,
 	getPaginationRowModel,
 	getSortedRowModel,
-	type ExpandedState,
 	type SortingState,
 	useReactTable,
 } from "@tanstack/react-table";
-import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react";
+import { ChevronDown, ChevronsUpDown, ChevronUp } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
+import {
+	NativeSelect,
+	NativeSelectOption,
+} from "~/components/ui/native-select";
 import {
 	Table,
 	TableBody,
@@ -93,10 +96,10 @@ export function ApiKeysTable({
 				cell: ({ row }) =>
 					row.getCanExpand() ? (
 						<button
-							type="button"
 							aria-label={row.getIsExpanded() ? "Einklappen" : "Ausklappen"}
-							onClick={row.getToggleExpandedHandler()}
 							className="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-muted-foreground transition hover:bg-muted"
+							onClick={row.getToggleExpandedHandler()}
+							type="button"
 						>
 							<ChevronDown
 								className={`h-4 w-4 transition-transform ${
@@ -112,9 +115,9 @@ export function ApiKeysTable({
 				cell: ({ row, getValue }) => {
 					if (row.original.kind === "model") {
 						return (
-							<span className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+							<span className="flex items-center gap-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
 								<span className="text-[0.7rem]">Modell</span>
-								<span className="text-sm font-semibold text-foreground">
+								<span className="font-semibold text-foreground text-sm">
 									{row.original.model ?? "Unbekannt"}
 								</span>
 							</span>
@@ -174,7 +177,7 @@ export function ApiKeysTable({
 					row.original.kind === "model" ? "—" : (getValue<string>() ?? "—"),
 			},
 		],
-		[]
+		[],
 	);
 
 	const table = useReactTable({
@@ -216,33 +219,41 @@ export function ApiKeysTable({
 		},
 	});
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset pagination when filters or data change.
 	useEffect(() => {
 		setPagination((prev) => ({ ...prev, pageIndex: 0 }));
 	}, [globalFilter, data.length]);
 
 	const totalRows = table.getFilteredRowModel().rows.length;
-	const startRow = totalRows === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1;
-	const endRow = Math.min(totalRows, (pagination.pageIndex + 1) * pagination.pageSize);
+	const startRow =
+		totalRows === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1;
+	const endRow = Math.min(
+		totalRows,
+		(pagination.pageIndex + 1) * pagination.pageSize,
+	);
 
 	return (
 		<div className="space-y-4">
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<div className="flex flex-1 flex-wrap items-center gap-3 justify-between">
+				<div className="flex flex-1 flex-wrap items-center justify-between gap-3">
 					<div className="flex grow items-center gap-2">
 						<Input
+							className="max-w-sm"
+							onChange={(event) => setGlobalFilter(event.target.value)}
 							placeholder="Nach ID, Beschreibung oder Tokens filtern"
 							value={globalFilter}
-							onChange={(event) => setGlobalFilter(event.target.value)}
-							className="max-w-sm"
 						/>
-					<span className="text-sm text-muted-foreground">
-						{totalRows} API-Key{totalRows === 1 ? "" : "s"}
-					</span>
+						<span className="text-muted-foreground text-sm">
+							{totalRows} API-Key{totalRows === 1 ? "" : "s"}
+						</span>
 					</div>
 					{action ? <div className="shrink-0">{action}</div> : null}
 				</div>
 				{globalFilter ? (
-					<Button variant="outline" size="sm" onClick={() => setGlobalFilter("")}
+					<Button
+						onClick={() => setGlobalFilter("")}
+						size="sm"
+						variant="outline"
 					>
 						Zurücksetzen
 					</Button>
@@ -250,25 +261,25 @@ export function ApiKeysTable({
 			</div>
 			<div className="rounded-lg border border-border">
 				<Table className="min-w-full border-separate border-spacing-0 text-sm">
-					<TableHeader className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+					<TableHeader className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
 						{table.getHeaderGroups().map((headerGroup) => (
 							<TableRow key={headerGroup.id}>
 								{headerGroup.headers.map((header) => {
 									const sorted = header.column.getIsSorted();
 									return (
 										<TableHead
+											className="border-border border-b px-4 py-3 text-left"
 											key={header.id}
-											className="border-b border-border px-4 py-3 text-left"
 										>
 											{header.isPlaceholder ? null : header.column.getCanSort() ? (
 												<button
-													type="button"
 													className="inline-flex items-center gap-1"
 													onClick={header.column.getToggleSortingHandler()}
+													type="button"
 												>
 													{flexRender(
 														header.column.columnDef.header,
-														header.getContext()
+														header.getContext(),
 													)}
 													{sorted === "asc" ? (
 														<ChevronUp className="h-3 w-3" />
@@ -279,7 +290,10 @@ export function ApiKeysTable({
 													)}
 												</button>
 											) : (
-												flexRender(header.column.columnDef.header, header.getContext())
+												flexRender(
+													header.column.columnDef.header,
+													header.getContext(),
+												)
 											)}
 										</TableHead>
 									);
@@ -290,17 +304,17 @@ export function ApiKeysTable({
 					<TableBody>
 						{table.getRowModel().rows.map((row) => (
 							<TableRow
-								key={row.id}
 								className={`hover:bg-muted/40 ${row.depth > 0 ? "bg-muted/20" : ""}`}
+								key={row.id}
 							>
 								{row.getVisibleCells().map((cell) => (
 									<TableCell
-										key={cell.id}
-										className={`border-b border-border px-4 py-3 ${
+										className={`border-border border-b px-4 py-3 ${
 											cell.column.id === "description" && row.depth > 0
 												? "pl-10"
 												: ""
 										}`}
+										key={cell.id}
 									>
 										{flexRender(cell.column.columnDef.cell, cell.getContext())}
 									</TableCell>
@@ -310,8 +324,8 @@ export function ApiKeysTable({
 						{table.getRowModel().rows.length === 0 ? (
 							<TableRow>
 								<TableCell
+									className="px-4 py-8 text-center text-muted-foreground text-sm"
 									colSpan={columns.length}
-									className="px-4 py-8 text-center text-sm text-muted-foreground"
 								>
 									Keine API-Keys passen zu diesem Filter.
 								</TableCell>
@@ -319,11 +333,11 @@ export function ApiKeysTable({
 						) : null}
 					</TableBody>
 				</Table>
-				<div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-					<div className="flex items-center gap-2 text-xs text-muted-foreground">
+				<div className="flex flex-col gap-2 border-border border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+					<div className="flex items-center gap-2 text-muted-foreground text-xs">
 						<span>Zeilen pro Seite</span>
 						<NativeSelect
-							value={String(pagination.pageSize)}
+							className="w-[90px]"
 							onChange={(event) =>
 								setPagination((prev) => ({
 									...prev,
@@ -331,8 +345,8 @@ export function ApiKeysTable({
 									pageIndex: 0,
 								}))
 							}
-							className="w-[90px]"
 							size="sm"
+							value={String(pagination.pageSize)}
 						>
 							{[10, 20, 50].map((size) => (
 								<NativeSelectOption key={size} value={String(size)}>
@@ -342,46 +356,46 @@ export function ApiKeysTable({
 						</NativeSelect>
 					</div>
 					<div className="flex items-center gap-3">
-						<span className="text-xs text-muted-foreground">
+						<span className="text-muted-foreground text-xs">
 							{startRow}-{endRow} von {totalRows}
 						</span>
-							<div className="flex items-center gap-1">
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => table.setPageIndex(0)}
-									disabled={!table.getCanPreviousPage()}
-								>
-									Erste
-								</Button>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => table.previousPage()}
-									disabled={!table.getCanPreviousPage()}
-								>
-									Zurück
-								</Button>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => table.nextPage()}
-									disabled={!table.getCanNextPage()}
-								>
-									Weiter
-								</Button>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-									disabled={!table.getCanNextPage()}
-								>
-									Letzte
-								</Button>
-							</div>
+						<div className="flex items-center gap-1">
+							<Button
+								disabled={!table.getCanPreviousPage()}
+								onClick={() => table.setPageIndex(0)}
+								size="sm"
+								variant="outline"
+							>
+								Erste
+							</Button>
+							<Button
+								disabled={!table.getCanPreviousPage()}
+								onClick={() => table.previousPage()}
+								size="sm"
+								variant="outline"
+							>
+								Zurück
+							</Button>
+							<Button
+								disabled={!table.getCanNextPage()}
+								onClick={() => table.nextPage()}
+								size="sm"
+								variant="outline"
+							>
+								Weiter
+							</Button>
+							<Button
+								disabled={!table.getCanNextPage()}
+								onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+								size="sm"
+								variant="outline"
+							>
+								Letzte
+							</Button>
 						</div>
 					</div>
 				</div>
+			</div>
 		</div>
 	);
 }

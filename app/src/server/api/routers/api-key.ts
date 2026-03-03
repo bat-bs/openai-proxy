@@ -1,7 +1,7 @@
-import { randomBytes, randomUUID } from "crypto";
-import { eq, sql } from "drizzle-orm";
-import { hash } from "bcryptjs";
+import { randomBytes, randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
+import { hash } from "bcryptjs";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
@@ -47,15 +47,19 @@ export const apiKeyRouter = createTRPCRouter({
 				model: requests.model,
 				inputTokens:
 					sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
-						"inputTokens"
+						"inputTokens",
 					),
-				cachedInputTokens: sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
-					"cachedInputTokens"
+				cachedInputTokens:
+					sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
+						"cachedInputTokens",
+					),
+				outputTokens:
+					sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
+						"outputTokens",
+					),
+				createdAt: sql<string | null>`min(${requests.requestTime})`.as(
+					"createdAt",
 				),
-				outputTokens: sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
-					"outputTokens"
-				),
-				createdAt: sql<string | null>`min(${requests.requestTime})`.as("createdAt"),
 			})
 			.from(apikeys)
 			.innerJoin(users, eq(apikeys.owner, users.id))
@@ -77,12 +81,18 @@ export const apiKeyRouter = createTRPCRouter({
 		const normalize = (value: string | null | undefined) =>
 			(value ?? "").trim().toLowerCase();
 
-		const costIndex = new Map<string, Map<string, {
-			price: number;
-			validFrom: string | null;
-			unit: "1M" | "1K" | null;
-			currency: string | null;
-		}>>();
+		const costIndex = new Map<
+			string,
+			Map<
+				string,
+				{
+					price: number;
+					validFrom: string | null;
+					unit: "1M" | "1K" | null;
+					currency: string | null;
+				}
+			>
+		>();
 
 		for (const row of costRows) {
 			const modelKey = normalize(row.model);
@@ -90,7 +100,9 @@ export const apiKeyRouter = createTRPCRouter({
 			if (!modelKey || !tokenKey) continue;
 			const modelMap = costIndex.get(modelKey) ?? new Map();
 			const existing = modelMap.get(tokenKey);
-			const currentValidFrom = row.validFrom ? new Date(row.validFrom).getTime() : 0;
+			const currentValidFrom = row.validFrom
+				? new Date(row.validFrom).getTime()
+				: 0;
 			const existingValidFrom = existing?.validFrom
 				? new Date(existing.validFrom).getTime()
 				: 0;
@@ -107,7 +119,13 @@ export const apiKeyRouter = createTRPCRouter({
 
 		const tokenAliases = {
 			input: ["input", "prompt", "input_tokens", "prompt_tokens"],
-			cached: ["cached_input", "cached", "cache", "input_cached", "cached_input_tokens"],
+			cached: [
+				"cached_input",
+				"cached",
+				"cache",
+				"input_cached",
+				"cached_input_tokens",
+			],
 			output: ["output", "completion", "output_tokens", "completion_tokens"],
 		};
 
@@ -116,10 +134,12 @@ export const apiKeyRouter = createTRPCRouter({
 			return 1_000_000;
 		};
 
+		const priceToCurrency = (price: number) => price / 100;
+
 		const calcTokenCost = (
 			model: string,
 			tokens: number,
-			aliases: string[]
+			aliases: string[],
 		) => {
 			if (tokens <= 0) return { cost: 0, missing: false };
 			const modelKey = normalize(model);
@@ -139,30 +159,33 @@ export const apiKeyRouter = createTRPCRouter({
 			}
 			if (!entry) return { cost: 0, missing: true };
 			return {
-				cost: (tokens / unitDivisor(entry.unit)) * entry.price,
+				cost: (tokens / unitDivisor(entry.unit)) * priceToCurrency(entry.price),
 				missing: false,
 				currency: entry.currency,
 			};
 		};
 
-		const byKey = new Map<string, {
-			id: string;
-			description: string | null;
-			inputTokens: number;
-			cachedInputTokens: number;
-			outputTokens: number;
-			createdAt: string | null;
-			models: Array<{
-				model: string;
+		const byKey = new Map<
+			string,
+			{
+				id: string;
+				description: string | null;
 				inputTokens: number;
 				cachedInputTokens: number;
 				outputTokens: number;
+				createdAt: string | null;
+				models: Array<{
+					model: string;
+					inputTokens: number;
+					cachedInputTokens: number;
+					outputTokens: number;
+					cost: number | null;
+					currency: string | null;
+				}>;
 				cost: number | null;
 				currency: string | null;
-			}>;
-			cost: number | null;
-			currency: string | null;
-		}>();
+			}
+		>();
 
 		for (const row of usageRows) {
 			const id = row.id;
@@ -190,15 +213,27 @@ export const apiKeyRouter = createTRPCRouter({
 			const model = row.model ?? "Unknown";
 			if (inputTokens + cachedInputTokens + outputTokens > 0) {
 				const inputCost = calcTokenCost(model, inputTokens, tokenAliases.input);
-				const cachedCost = calcTokenCost(model, cachedInputTokens, tokenAliases.cached);
-				const outputCost = calcTokenCost(model, outputTokens, tokenAliases.output);
-				const modelMissing = inputCost.missing || cachedCost.missing || outputCost.missing;
-				const currencies = [inputCost.currency, cachedCost.currency, outputCost.currency].filter(
-					(value): value is string => Boolean(value)
+				const cachedCost = calcTokenCost(
+					model,
+					cachedInputTokens,
+					tokenAliases.cached,
 				);
+				const outputCost = calcTokenCost(
+					model,
+					outputTokens,
+					tokenAliases.output,
+				);
+				const modelMissing =
+					inputCost.missing || cachedCost.missing || outputCost.missing;
+				const currencies = [
+					inputCost.currency,
+					cachedCost.currency,
+					outputCost.currency,
+				].filter((value): value is string => Boolean(value));
 				const modelCurrency =
-					currencies.length > 0 && currencies.every((value) => value === currencies[0])
-						? currencies[0] ?? null
+					currencies.length > 0 &&
+					currencies.every((value) => value === currencies[0])
+						? (currencies[0] ?? null)
 						: null;
 				const modelCost = modelMissing
 					? null
@@ -244,7 +279,7 @@ export const apiKeyRouter = createTRPCRouter({
 		.input(
 			z.object({
 				description: z.string().trim().max(255).optional(),
-			})
+			}),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const owner = ctx.session.user.id;
@@ -256,10 +291,7 @@ export const apiKeyRouter = createTRPCRouter({
 			const hashed = await hash(token, 5);
 			const id = randomUUID();
 
-			await ctx.db
-				.insert(users)
-				.values({ id: owner })
-				.onConflictDoNothing();
+			await ctx.db.insert(users).values({ id: owner }).onConflictDoNothing();
 
 			await ctx.db.insert(apikeys).values({
 				uuid: id,

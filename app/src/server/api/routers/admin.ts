@@ -1,10 +1,9 @@
 import { TRPCError } from "@trpc/server";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-
+import { costUnitOptions } from "~/lib/costs";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { apikeys, costs, models, requests, users } from "~/server/db/schema";
-import { costUnitOptions } from "~/lib/costs";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 	if (!ctx.session.user.isAdmin) {
@@ -44,7 +43,7 @@ export const adminRouter = createTRPCRouter({
 									"7d": 7 * 24 * 60 * 60 * 1000,
 									"30d": 30 * 24 * 60 * 60 * 1000,
 									all: 0,
-								}[input.range]
+								}[input.range],
 						).toISOString();
 
 			const requestTimeFilter = since
@@ -55,7 +54,7 @@ export const adminRouter = createTRPCRouter({
 				.select({
 					totalTokens:
 						sql<number>`coalesce(sum(${requests.inputTokenCount} + ${requests.outputTokenCount}), 0)`.as(
-							"totalTokens"
+							"totalTokens",
 						),
 				})
 				.from(requests);
@@ -68,14 +67,14 @@ export const adminRouter = createTRPCRouter({
 					model: requests.model,
 					tokens:
 						sql<number>`coalesce(sum(${requests.inputTokenCount} + ${requests.outputTokenCount}), 0)`.as(
-							"tokens"
+							"tokens",
 						),
 				})
 				.from(requests);
 			const modelRows = await (requestTimeFilter
 				? modelBase.where(requestTimeFilter)
-				: modelBase)
-				.groupBy(requests.model);
+				: modelBase
+			).groupBy(requests.model);
 
 			const requestsJoin = requestTimeFilter
 				? and(eq(apikeys.uuid, requests.apiKeyId), requestTimeFilter)
@@ -87,22 +86,22 @@ export const adminRouter = createTRPCRouter({
 					name: users.name,
 					inputTokens:
 						sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
-							"inputTokens"
+							"inputTokens",
 						),
 					cachedTokens:
 						sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
-							"cachedTokens"
+							"cachedTokens",
 						),
 					outputTokens:
 						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
-							"outputTokens"
+							"outputTokens",
 						),
 					lastActivity: sql<string | null>`max(${requests.requestTime})`.as(
-						"lastActivity"
+						"lastActivity",
 					),
 					totalTokens:
 						sql<number>`coalesce(sum(${requests.inputTokenCount} + ${requests.outputTokenCount}), 0)`.as(
-							"totalTokens"
+							"totalTokens",
 						),
 				})
 				.from(users)
@@ -110,7 +109,7 @@ export const adminRouter = createTRPCRouter({
 				.leftJoin(requests, requestsJoin)
 				.groupBy(users.id, users.name)
 				.orderBy(
-					sql`coalesce(sum(${requests.inputTokenCount} + ${requests.outputTokenCount}), 0) desc`
+					sql`coalesce(sum(${requests.inputTokenCount} + ${requests.outputTokenCount}), 0) desc`,
 				);
 
 			const totalTokens = Number(totalRow[0]?.totalTokens ?? 0);
@@ -135,7 +134,10 @@ export const adminRouter = createTRPCRouter({
 			};
 		}),
 	listModels: adminProcedure.query(async ({ ctx }) => {
-		const rows = await ctx.db.select({ id: models.id }).from(models).orderBy(models.id);
+		const rows = await ctx.db
+			.select({ id: models.id })
+			.from(models)
+			.orderBy(models.id);
 		return rows.map((row) => row.id);
 	}),
 	listCosts: adminProcedure.query(async ({ ctx }) => {
@@ -160,27 +162,28 @@ export const adminRouter = createTRPCRouter({
 			currency: row.currency ? row.currency.trim() : null,
 		}));
 	}),
-	createCost: adminProcedure.input(costInput).mutation(async ({ ctx, input }) => {
-		const validFrom =
-			input.validFrom?.trim() ||
-			new Date().toISOString().slice(0, 10);
+	createCost: adminProcedure
+		.input(costInput)
+		.mutation(async ({ ctx, input }) => {
+			const validFrom =
+				input.validFrom?.trim() || new Date().toISOString().slice(0, 10);
 
-		await ctx.db.insert(costs).values({
-			model: input.model,
-			price: input.price,
-			validFrom,
-			tokenType: input.tokenType,
-			unitOfMessure: input.unitOfMessure ?? null,
-			isRegional: input.isRegional,
-			backendName: input.backendName,
-			currency: input.currency ?? null,
-		});
-	}),
+			await ctx.db.insert(costs).values({
+				model: input.model,
+				price: input.price,
+				validFrom,
+				tokenType: input.tokenType,
+				unitOfMessure: input.unitOfMessure ?? null,
+				isRegional: input.isRegional,
+				backendName: input.backendName,
+				currency: input.currency ?? null,
+			});
+		}),
 	updatePricing: adminProcedure
 		.input(
 			z.object({
 				update: costInput,
-			})
+			}),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const validFrom = new Date().toISOString().slice(0, 10);
@@ -202,7 +205,7 @@ export const adminRouter = createTRPCRouter({
 			z.object({
 				original: costInput,
 				update: costInput,
-			})
+			}),
 		)
 		.mutation(async ({ ctx, input }) => {
 			const original = input.original;
@@ -232,8 +235,8 @@ export const adminRouter = createTRPCRouter({
 						eq(costs.validFrom, original.validFrom),
 						eq(costs.tokenType, original.tokenType),
 						eq(costs.isRegional, original.isRegional),
-						eq(costs.backendName, original.backendName)
-					)
+						eq(costs.backendName, original.backendName),
+					),
 				);
 		}),
 });
