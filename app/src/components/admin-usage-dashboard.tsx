@@ -78,6 +78,7 @@ export function AdminUsageDashboard({
 	const [pageIndex, setPageIndex] = useState(0);
 	const [pageSize, setPageSize] = useState(10);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset pagination when users change.
 	useEffect(() => {
 		setPageIndex(0);
 	}, [stats.users.length]);

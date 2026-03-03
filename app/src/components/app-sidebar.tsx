@@ -1,4 +1,5 @@
 import { LogOut } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { SidebarNav } from "~/components/sidebar-nav";
 import {
@@ -23,11 +24,14 @@ export async function AppSidebar() {
 					<details className="group relative w-full">
 						<summary className="flex w-full cursor-pointer list-none items-center gap-2 rounded-none p-2 text-left text-xs hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
 							{session.user.image ? (
-								<img
+								<Image
 									alt=""
 									className="h-6 w-6 rounded-full object-cover"
+									height={24}
 									referrerPolicy="no-referrer"
 									src={session.user.image}
+									unoptimized
+									width={24}
 								/>
 							) : (
 								<div className="flex h-6 w-6 items-center justify-center rounded-full bg-sidebar-accent font-medium text-[10px] text-sidebar-accent-foreground">

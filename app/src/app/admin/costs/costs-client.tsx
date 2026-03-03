@@ -101,10 +101,14 @@ export function CostsClient() {
 						</div>
 						<div className="grid gap-3 md:grid-cols-3">
 							<div className="flex flex-col gap-1">
-								<label className="font-medium text-muted-foreground text-xs">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-model"
+								>
 									Modell
 								</label>
 								<Input
+									id="costs-create-model"
 									list="costs-models"
 									onChange={(event) => setModel(event.target.value)}
 									placeholder="gpt-4.1"
@@ -112,20 +116,28 @@ export function CostsClient() {
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="font-medium text-muted-foreground text-xs">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-token-type"
+								>
 									Token-Typ
 								</label>
 								<Input
+									id="costs-create-token-type"
 									onChange={(event) => setTokenType(event.target.value)}
 									placeholder="input"
 									value={tokenType}
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="font-medium text-muted-foreground text-xs">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-price"
+								>
 									Preis
 								</label>
 								<Input
+									id="costs-create-price"
 									min={0}
 									onChange={(event) => setPrice(event.target.value)}
 									placeholder="0"
@@ -134,21 +146,29 @@ export function CostsClient() {
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="font-medium text-muted-foreground text-xs">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-valid-from"
+								>
 									Gültig ab
 								</label>
 								<Input
+									id="costs-create-valid-from"
 									onChange={(event) => setValidFrom(event.target.value)}
 									type="date"
 									value={validFrom}
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="font-medium text-muted-foreground text-xs">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-unit"
+								>
 									Einheit
 								</label>
 								<NativeSelect
 									className="w-full"
+									id="costs-create-unit"
 									onChange={(event) =>
 										setUnitOfMessure(event.target.value as CostUnit)
 									}
@@ -162,20 +182,28 @@ export function CostsClient() {
 								</NativeSelect>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="font-medium text-muted-foreground text-xs">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-backend"
+								>
 									Backend
 								</label>
 								<Input
+									id="costs-create-backend"
 									onChange={(event) => setBackendName(event.target.value)}
 									placeholder="openai"
 									value={backendName}
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="font-medium text-muted-foreground text-xs">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-currency"
+								>
 									Währung
 								</label>
 								<Input
+									id="costs-create-currency"
 									maxLength={3}
 									onChange={(event) =>
 										setCurrency(event.target.value.toUpperCase())

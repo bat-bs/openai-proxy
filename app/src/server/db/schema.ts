@@ -43,6 +43,7 @@ export const company = pgTable("company", {
 		startWith: 1,
 		increment: 1,
 		minValue: 1,
+		// biome-ignore lint/correctness/noPrecisionLoss: matches Postgres BIGINT max.
 		maxValue: 9223372036854775807,
 		cache: 1,
 	}),

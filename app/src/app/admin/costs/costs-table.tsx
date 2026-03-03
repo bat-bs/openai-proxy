@@ -116,6 +116,10 @@ function CostEditDialog({
 	const [isRegional, setIsRegional] = useState(row.isRegional);
 	const [backendName, setBackendName] = useState(row.backendName);
 	const [currency, setCurrency] = useState(row.currency ?? "");
+	const fieldKey = `${row.model}-${row.tokenType}-${row.price}`.replace(
+		/[^a-zA-Z0-9-_]/g,
+		"-",
+	);
 
 	const priceValue = useMemo(() => Number.parseInt(price, 10), [price]);
 	const canSubmit =
@@ -171,11 +175,15 @@ function CostEditDialog({
 					</DialogDescription>
 				</DialogHeader>
 				<div className="grid gap-3">
-					<label className="font-medium text-muted-foreground text-xs">
+					<label
+						className="font-medium text-muted-foreground text-xs"
+						htmlFor={`costs-action-${fieldKey}`}
+					>
 						Aktion
 					</label>
 					<select
 						className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+						id={`costs-action-${fieldKey}`}
 						onChange={(event) =>
 							setMode(event.target.value as "update" | "modify")
 						}
@@ -186,10 +194,14 @@ function CostEditDialog({
 					</select>
 					<div className="grid gap-3 md:grid-cols-2">
 						<div className="flex flex-col gap-1">
-							<label className="font-medium text-muted-foreground text-xs">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-model-${fieldKey}`}
+							>
 								Modell
 							</label>
 							<Input
+								id={`costs-model-${fieldKey}`}
 								list="costs-models"
 								onChange={(event) => setModel(event.target.value)}
 								placeholder="gpt-4.1"
@@ -197,20 +209,28 @@ function CostEditDialog({
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="font-medium text-muted-foreground text-xs">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-token-${fieldKey}`}
+							>
 								Token-Typ
 							</label>
 							<Input
+								id={`costs-token-${fieldKey}`}
 								onChange={(event) => setTokenType(event.target.value)}
 								placeholder="input"
 								value={tokenType}
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="font-medium text-muted-foreground text-xs">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-price-${fieldKey}`}
+							>
 								Preis
 							</label>
 							<Input
+								id={`costs-price-${fieldKey}`}
 								min={0}
 								onChange={(event) => setPrice(event.target.value)}
 								type="number"
@@ -218,11 +238,15 @@ function CostEditDialog({
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="font-medium text-muted-foreground text-xs">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-valid-${fieldKey}`}
+							>
 								Gültig ab
 							</label>
 							<Input
 								disabled={mode === "update"}
+								id={`costs-valid-${fieldKey}`}
 								onChange={(event) => setValidFrom(event.target.value)}
 								type="date"
 								value={effectiveValidFrom}
@@ -234,11 +258,15 @@ function CostEditDialog({
 							) : null}
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="font-medium text-muted-foreground text-xs">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-unit-${fieldKey}`}
+							>
 								Einheit
 							</label>
 							<NativeSelect
 								className="w-full"
+								id={`costs-unit-${fieldKey}`}
 								onChange={(event) =>
 									setUnitOfMessure(event.target.value as CostUnit)
 								}
@@ -252,20 +280,28 @@ function CostEditDialog({
 							</NativeSelect>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="font-medium text-muted-foreground text-xs">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-backend-${fieldKey}`}
+							>
 								Backend
 							</label>
 							<Input
+								id={`costs-backend-${fieldKey}`}
 								onChange={(event) => setBackendName(event.target.value)}
 								placeholder="openai"
 								value={backendName}
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="font-medium text-muted-foreground text-xs">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-currency-${fieldKey}`}
+							>
 								Währung
 							</label>
 							<Input
+								id={`costs-currency-${fieldKey}`}
 								maxLength={3}
 								onChange={(event) =>
 									setCurrency(event.target.value.toUpperCase())
@@ -481,6 +517,7 @@ export function CostsTable({
 		getPaginationRowModel: getPaginationRowModel(),
 	});
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset pagination when filters change.
 	useEffect(() => {
 		setPagination((prev) => ({ ...prev, pageIndex: 0 }));
 	}, [

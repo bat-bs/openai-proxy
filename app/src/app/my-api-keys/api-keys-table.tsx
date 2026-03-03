@@ -219,6 +219,7 @@ export function ApiKeysTable({
 		},
 	});
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset pagination when filters or data change.
 	useEffect(() => {
 		setPagination((prev) => ({ ...prev, pageIndex: 0 }));
 	}, [globalFilter, data.length]);
