@@ -11,6 +11,7 @@ import {TooltipProvider} from "~/components/ui/tooltip";
 import {auth} from "~/server/auth";
 import {TRPCReactProvider} from "~/trpc/react";
 import {Toaster} from "~/components/ui/sonner";
+import {ThemeProvider} from "~/components/theme-provider";
 
 export const metadata: Metadata = {
     title: "RobadsAI API-Proxy Verwaltung",
@@ -24,35 +25,35 @@ const geist = Geist({
 });
 
 export default async function RootLayout({
-                                            children,
-                                        }: Readonly<{ children: React.ReactNode }>) {
+                                             children,
+                                         }: Readonly<{ children: React.ReactNode }>) {
     const session = await auth();
     if (!session?.user) {
         redirect("/api/auth/signin");
     }
     return (
         <html className={`${geist.variable}`} lang="de" suppressHydrationWarning>
-        <head>
-            <script
-                dangerouslySetInnerHTML={{
-                    __html:
-                        "(function(){try{var t=localStorage.getItem('theme');var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var e=t?t==='dark':d;document.documentElement.classList.toggle('dark',e);}catch(_){}})();",
-                }}
-            />
-        </head>
         <body>
-        <TRPCReactProvider>
-            <TooltipProvider>
-                <SidebarProvider>
-                    <Toaster />
-                    <AppSidebar/>
-                    <SidebarInset>
-                        <SiteHeader/>
-                        {children}
-                    </SidebarInset>
-                </SidebarProvider>
-            </TooltipProvider>
-        </TRPCReactProvider>
+        <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+        >
+            <TRPCReactProvider>
+                <TooltipProvider>
+                    <SidebarProvider>
+                        <Toaster/>
+                        <AppSidebar/>
+                        <SidebarInset>
+                            <SiteHeader/>
+                            {children}
+                        </SidebarInset>
+                    </SidebarProvider>
+                </TooltipProvider>
+            </TRPCReactProvider>
+
+        </ThemeProvider>
         </body>
         </html>
     );
