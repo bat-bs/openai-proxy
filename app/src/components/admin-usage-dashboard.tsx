@@ -1,5 +1,15 @@
 "use client";
 
+import {
+	type ColumnDef,
+	flexRender,
+	getCoreRowModel,
+	getPaginationRowModel,
+	getSortedRowModel,
+	type SortingState,
+	useReactTable,
+} from "@tanstack/react-table";
+import { ChevronDown, ChevronsUpDown, ChevronUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Pie, PieChart } from "recharts";
@@ -75,12 +85,15 @@ export function AdminUsageDashboard({
 		dateStyle: "medium",
 		timeStyle: "short",
 	});
-	const [pageIndex, setPageIndex] = useState(0);
-	const [pageSize, setPageSize] = useState(10);
+	const [sorting, setSorting] = useState<SortingState>([]);
+	const [pagination, setPagination] = useState({
+		pageIndex: 0,
+		pageSize: 10,
+	});
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reset pagination when users change.
 	useEffect(() => {
-		setPageIndex(0);
+		setPagination((prev) => ({ ...prev, pageIndex: 0 }));
 	}, [stats.users.length]);
 
 	const pieData = stats.modelUsage.map((item, index) => {
@@ -101,15 +114,73 @@ export function AdminUsageDashboard({
 		return acc;
 	}, {});
 
-	const totalUsers = stats.users.length;
-	const totalPages = Math.max(1, Math.ceil(totalUsers / pageSize));
-	const clampedPageIndex = Math.min(pageIndex, totalPages - 1);
-	const startRow = totalUsers === 0 ? 0 : clampedPageIndex * pageSize + 1;
-	const endRow = Math.min(totalUsers, (clampedPageIndex + 1) * pageSize);
-	const pagedUsers = useMemo(() => {
-		const start = clampedPageIndex * pageSize;
-		return stats.users.slice(start, start + pageSize);
-	}, [clampedPageIndex, pageSize, stats.users]);
+	const columns = useMemo<ColumnDef<UsageUser>[]>(
+		() => [
+			{
+				accessorKey: "name",
+				header: "Benutzername",
+				cell: ({ getValue }) => (
+					<span className="font-medium">{getValue<string>()}</span>
+				),
+			},
+			{
+				accessorKey: "inputTokens",
+				header: "Input-Tokens",
+				cell: ({ getValue }) => numberFormatter.format(getValue<number>()),
+				sortingFn: "basic",
+			},
+			{
+				accessorKey: "cachedTokens",
+				header: "Cache-Tokens",
+				cell: ({ getValue }) => numberFormatter.format(getValue<number>()),
+				sortingFn: "basic",
+			},
+			{
+				accessorKey: "outputTokens",
+				header: "Output-Tokens",
+				cell: ({ getValue }) => numberFormatter.format(getValue<number>()),
+				sortingFn: "basic",
+			},
+			{
+				accessorKey: "lastActivity",
+				header: "Letzte Aktivität",
+				cell: ({ getValue }) => {
+					const value = getValue<string | null>();
+					return value ? dateFormatter.format(new Date(value)) : "—";
+				},
+				sortingFn: (rowA, rowB, columnId) => {
+					const a = rowA.getValue<string | null>(columnId);
+					const b = rowB.getValue<string | null>(columnId);
+					const aTime = a ? new Date(a).getTime() : 0;
+					const bTime = b ? new Date(b).getTime() : 0;
+					return aTime === bTime ? 0 : aTime > bTime ? 1 : -1;
+				},
+			},
+		],
+		[dateFormatter, numberFormatter],
+	);
+
+	const table = useReactTable({
+		data: stats.users,
+		columns,
+		state: {
+			sorting,
+			pagination,
+		},
+		onSortingChange: setSorting,
+		onPaginationChange: setPagination,
+		getCoreRowModel: getCoreRowModel(),
+		getSortedRowModel: getSortedRowModel(),
+		getPaginationRowModel: getPaginationRowModel(),
+	});
+
+	const totalUsers = table.getPrePaginationRowModel().rows.length;
+	const startRow =
+		totalUsers === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1;
+	const endRow = Math.min(
+		totalUsers,
+		(pagination.pageIndex + 1) * pagination.pageSize,
+	);
 
 	return (
 		<div className="mx-auto w-full max-w-6xl px-6 py-10">
@@ -179,47 +250,62 @@ export function AdminUsageDashboard({
 					<div className="mt-4">
 						<Table className="border-collapse text-xs">
 							<TableHeader>
-								<TableRow className="border-border text-left text-[11px] text-muted-foreground uppercase tracking-wide">
-									<TableHead className="pr-3 pb-2 font-medium">
-										Benutzername
-									</TableHead>
-									<TableHead className="pr-3 pb-2 font-medium">
-										Input-Tokens
-									</TableHead>
-									<TableHead className="pr-3 pb-2 font-medium">
-										Cache-Tokens
-									</TableHead>
-									<TableHead className="pr-3 pb-2 font-medium">
-										Output-Tokens
-									</TableHead>
-									<TableHead className="pb-2 font-medium">
-										Letzte Aktivität
-									</TableHead>
-								</TableRow>
+								{table.getHeaderGroups().map((headerGroup) => (
+									<TableRow
+										className="border-border text-left text-[11px] text-muted-foreground uppercase tracking-wide"
+										key={headerGroup.id}
+									>
+										{headerGroup.headers.map((header) => {
+											const sorted = header.column.getIsSorted();
+											return (
+												<TableHead
+													className="pr-3 pb-2 font-medium"
+													key={header.id}
+												>
+													{header.isPlaceholder ? null : header.column.getCanSort() ? (
+														<button
+															className="inline-flex items-center gap-1"
+															onClick={header.column.getToggleSortingHandler()}
+															type="button"
+														>
+															{flexRender(
+																header.column.columnDef.header,
+																header.getContext(),
+															)}
+															{sorted === "asc" ? (
+																<ChevronUp className="h-3 w-3" />
+															) : sorted === "desc" ? (
+																<ChevronDown className="h-3 w-3" />
+															) : (
+																<ChevronsUpDown className="h-3 w-3 text-muted-foreground" />
+															)}
+														</button>
+													) : (
+														flexRender(
+															header.column.columnDef.header,
+															header.getContext(),
+														)
+													)}
+												</TableHead>
+											);
+										})}
+									</TableRow>
+								))}
 							</TableHeader>
 							<TableBody>
-								{pagedUsers.map((user) => (
+								{table.getRowModel().rows.map((row) => (
 									<TableRow
 										className="border-border/60 last:border-0"
-										key={user.id}
+										key={row.id}
 									>
-										<TableCell className="py-2 pr-3 font-medium">
-											{user.name}
-										</TableCell>
-										<TableCell className="py-2 pr-3">
-											{numberFormatter.format(user.inputTokens)}
-										</TableCell>
-										<TableCell className="py-2 pr-3">
-											{numberFormatter.format(user.cachedTokens)}
-										</TableCell>
-										<TableCell className="py-2 pr-3">
-											{numberFormatter.format(user.outputTokens)}
-										</TableCell>
-										<TableCell className="py-2">
-											{user.lastActivity
-												? dateFormatter.format(new Date(user.lastActivity))
-												: "—"}
-										</TableCell>
+										{row.getVisibleCells().map((cell) => (
+											<TableCell className="py-2 pr-3" key={cell.id}>
+												{flexRender(
+													cell.column.columnDef.cell,
+													cell.getContext(),
+												)}
+											</TableCell>
+										))}
 									</TableRow>
 								))}
 								{!stats.users.length ? (
@@ -240,11 +326,14 @@ export function AdminUsageDashboard({
 								<NativeSelect
 									className="w-[80px]"
 									onChange={(event) => {
-										setPageSize(Number(event.target.value));
-										setPageIndex(0);
+										setPagination((prev) => ({
+											...prev,
+											pageSize: Number(event.target.value),
+											pageIndex: 0,
+										}));
 									}}
 									size="sm"
-									value={String(pageSize)}
+									value={String(pagination.pageSize)}
 								>
 									{[10, 20, 50].map((size) => (
 										<NativeSelectOption key={size} value={String(size)}>
@@ -259,36 +348,32 @@ export function AdminUsageDashboard({
 								</span>
 								<div className="flex items-center gap-1">
 									<Button
-										disabled={clampedPageIndex === 0}
-										onClick={() => setPageIndex(0)}
+										disabled={!table.getCanPreviousPage()}
+										onClick={() => table.setPageIndex(0)}
 										size="sm"
 										variant="outline"
 									>
 										Erste
 									</Button>
 									<Button
-										disabled={clampedPageIndex === 0}
-										onClick={() =>
-											setPageIndex((prev) => Math.max(0, prev - 1))
-										}
+										disabled={!table.getCanPreviousPage()}
+										onClick={() => table.previousPage()}
 										size="sm"
 										variant="outline"
 									>
 										Zurück
 									</Button>
 									<Button
-										disabled={clampedPageIndex >= totalPages - 1}
-										onClick={() =>
-											setPageIndex((prev) => Math.min(totalPages - 1, prev + 1))
-										}
+										disabled={!table.getCanNextPage()}
+										onClick={() => table.nextPage()}
 										size="sm"
 										variant="outline"
 									>
 										Weiter
 									</Button>
 									<Button
-										disabled={clampedPageIndex >= totalPages - 1}
-										onClick={() => setPageIndex(totalPages - 1)}
+										disabled={!table.getCanNextPage()}
+										onClick={() => table.setPageIndex(table.getPageCount() - 1)}
 										size="sm"
 										variant="outline"
 									>

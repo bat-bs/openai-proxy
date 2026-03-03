@@ -134,6 +134,8 @@ export const apiKeyRouter = createTRPCRouter({
 			return 1_000_000;
 		};
 
+		const priceToCurrency = (price: number) => price / 100;
+
 		const calcTokenCost = (
 			model: string,
 			tokens: number,
@@ -157,7 +159,7 @@ export const apiKeyRouter = createTRPCRouter({
 			}
 			if (!entry) return { cost: 0, missing: true };
 			return {
-				cost: (tokens / unitDivisor(entry.unit)) * entry.price,
+				cost: (tokens / unitDivisor(entry.unit)) * priceToCurrency(entry.price),
 				missing: false,
 				currency: entry.currency,
 			};
