@@ -198,7 +198,7 @@ export const apiKeyRouter = createTRPCRouter({
 				);
 				const modelCurrency =
 					currencies.length > 0 && currencies.every((value) => value === currencies[0])
-						? currencies[0]
+						? currencies[0] ?? null
 						: null;
 				const modelCost = modelMissing
 					? null
