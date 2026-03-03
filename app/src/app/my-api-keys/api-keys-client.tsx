@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-
+import { toast } from "sonner";
 import { Button } from "~/components/ui/button";
 import {
 	Dialog,
@@ -15,7 +15,6 @@ import {
 import { Input } from "~/components/ui/input";
 import { api } from "~/trpc/react";
 import { ApiKeysTable } from "./api-keys-table";
-import { toast } from "sonner";
 
 export function ApiKeysClient() {
 	const utils = api.useUtils();
@@ -43,7 +42,6 @@ export function ApiKeysClient() {
 	return (
 		<div className="space-y-6">
 			<Dialog
-				open={dialogOpen}
 				onOpenChange={(open) => {
 					setDialogOpen(open);
 					if (!open) {
@@ -54,11 +52,19 @@ export function ApiKeysClient() {
 						createApiKey.reset();
 					}
 				}}
+				open={dialogOpen}
 			>
 				{isLoading ? (
-					<div className="text-sm text-muted-foreground">Schlüssel werden geladen...</div>
+					<div className="text-muted-foreground text-sm">
+						Schlüssel werden geladen...
+					</div>
 				) : (
 					<ApiKeysTable
+						action={
+							<DialogTrigger render={<Button />}>
+								API-Key erstellen
+							</DialogTrigger>
+						}
 						data={data.map((row) => ({
 							kind: "key",
 							id: row.id,
@@ -79,7 +85,6 @@ export function ApiKeysClient() {
 								currency: modelRow.currency ?? null,
 							})),
 						}))}
-						action={<DialogTrigger render={<Button />}>API-Key erstellen</DialogTrigger>}
 					/>
 				)}
 				<DialogContent>
@@ -91,31 +96,29 @@ export function ApiKeysClient() {
 					</DialogHeader>
 					<div className="grid gap-3">
 						<Input
+							onChange={(event) => setDescription(event.target.value)}
 							placeholder="Beschreibung (optional)"
 							value={description}
-							onChange={(event) => setDescription(event.target.value)}
 						/>
 						{token ? (
 							<div className="space-y-2 rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-yellow-900">
-								<div className="text-xs font-semibold uppercase tracking-wide">
+								<div className="font-semibold text-xs uppercase tracking-wide">
 									Warnung
 								</div>
 								<p className="text-sm">
-									Dieser Schlüssel wird nur einmal angezeigt. Bitte jetzt sicher speichern.
+									Dieser Schlüssel wird nur einmal angezeigt. Bitte jetzt sicher
+									speichern.
 								</p>
 								<div className="grid gap-2">
 									<Input readOnly value={token} />
 									{createdId ? (
-										<span className="self-center text-xs text-muted-foreground">
+										<span className="self-center text-muted-foreground text-xs">
 											ID: {createdId}
 										</span>
 									) : null}
 								</div>
 								<div className="flex items-center gap-2">
 									<Button
-										type="button"
-										variant="outline"
-										size="sm"
 										onClick={async () => {
 											try {
 												await navigator.clipboard.writeText(token);
@@ -125,11 +128,16 @@ export function ApiKeysClient() {
 												setCopied(false);
 											}
 										}}
+										size="sm"
+										type="button"
+										variant="outline"
 									>
 										Token kopieren
 									</Button>
 									{copied ? (
-										<span className="text-xs text-muted-foreground">Kopiert.</span>
+										<span className="text-muted-foreground text-xs">
+											Kopiert.
+										</span>
 									) : null}
 								</div>
 							</div>
@@ -145,11 +153,14 @@ export function ApiKeysClient() {
 									})
 								}
 							>
-								{createApiKey.isPending ? "Wird erstellt..." : "Schlüssel erstellen"}
+								{createApiKey.isPending
+									? "Wird erstellt..."
+									: "Schlüssel erstellen"}
 							</Button>
 							{createApiKey.error ? (
-								<span className="text-xs text-destructive">
-									Schlüssel konnte nicht erstellt werden. Bitte erneut versuchen.
+								<span className="text-destructive text-xs">
+									Schlüssel konnte nicht erstellt werden. Bitte erneut
+									versuchen.
 								</span>
 							) : null}
 						</div>

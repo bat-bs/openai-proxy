@@ -8,6 +8,6 @@ export default {
 	dbCredentials: {
 		url: env.DATABASE_URL,
 	},
-	strict: true
+	strict: true,
 	//tablesFilter: ["analytics-app_*"],
 } satisfies Config;

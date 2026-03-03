@@ -1,14 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-
+import { toast } from "sonner";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
+import {
+	NativeSelect,
+	NativeSelectOption,
+} from "~/components/ui/native-select";
+import { type CostUnit, costUnitOptions } from "~/lib/costs";
 import { api } from "~/trpc/react";
 import { CostsTable } from "./costs-table";
-import { toast } from "sonner";
-import { costUnitOptions, type CostUnit } from "~/lib/costs";
 
 const defaultUnit = costUnitOptions[0];
 const defaultBackend = "openai";
@@ -81,8 +83,8 @@ export function CostsClient() {
 	return (
 		<div className="mx-auto w-full max-w-6xl px-6 py-10">
 			<div className="flex flex-col gap-2">
-				<h1 className="text-2xl font-semibold">Kostenverwaltung</h1>
-				<p className="text-sm text-muted-foreground">
+				<h1 className="font-semibold text-2xl">Kostenverwaltung</h1>
+				<p className="text-muted-foreground text-sm">
 					Neue Preise anlegen oder bestehende Einträge aktualisieren.
 				</p>
 			</div>
@@ -91,55 +93,66 @@ export function CostsClient() {
 				<div className="rounded-lg border border-border bg-card p-6">
 					<div className="flex flex-col gap-4">
 						<div>
-							<h2 className="text-sm font-semibold">Neuen Eintrag anlegen</h2>
-							<p className="text-xs text-muted-foreground">
-								Standardwerte: Backend {defaultBackend}, Einheit {defaultUnit}, Währung {defaultCurrency}.
+							<h2 className="font-semibold text-sm">Neuen Eintrag anlegen</h2>
+							<p className="text-muted-foreground text-xs">
+								Standardwerte: Backend {defaultBackend}, Einheit {defaultUnit},
+								Währung {defaultCurrency}.
 							</p>
 						</div>
 						<div className="grid gap-3 md:grid-cols-3">
 							<div className="flex flex-col gap-1">
-								<label className="text-xs font-medium text-muted-foreground">Modell</label>
+								<label className="font-medium text-muted-foreground text-xs">
+									Modell
+								</label>
 								<Input
 									list="costs-models"
-									value={model}
 									onChange={(event) => setModel(event.target.value)}
 									placeholder="gpt-4.1"
+									value={model}
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="text-xs font-medium text-muted-foreground">Token-Typ</label>
+								<label className="font-medium text-muted-foreground text-xs">
+									Token-Typ
+								</label>
 								<Input
-									value={tokenType}
 									onChange={(event) => setTokenType(event.target.value)}
 									placeholder="input"
+									value={tokenType}
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="text-xs font-medium text-muted-foreground">Preis</label>
+								<label className="font-medium text-muted-foreground text-xs">
+									Preis
+								</label>
 								<Input
-									type="number"
-									value={price}
+									min={0}
 									onChange={(event) => setPrice(event.target.value)}
 									placeholder="0"
-									min={0}
+									type="number"
+									value={price}
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="text-xs font-medium text-muted-foreground">Gültig ab</label>
+								<label className="font-medium text-muted-foreground text-xs">
+									Gültig ab
+								</label>
 								<Input
+									onChange={(event) => setValidFrom(event.target.value)}
 									type="date"
 									value={validFrom}
-									onChange={(event) => setValidFrom(event.target.value)}
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="text-xs font-medium text-muted-foreground">Einheit</label>
+								<label className="font-medium text-muted-foreground text-xs">
+									Einheit
+								</label>
 								<NativeSelect
-									value={unitOfMessure}
+									className="w-full"
 									onChange={(event) =>
 										setUnitOfMessure(event.target.value as CostUnit)
 									}
-									className="w-full"
+									value={unitOfMessure}
 								>
 									{costUnitOptions.map((unit) => (
 										<NativeSelectOption key={unit} value={unit}>
@@ -149,31 +162,37 @@ export function CostsClient() {
 								</NativeSelect>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="text-xs font-medium text-muted-foreground">Backend</label>
+								<label className="font-medium text-muted-foreground text-xs">
+									Backend
+								</label>
 								<Input
-									value={backendName}
 									onChange={(event) => setBackendName(event.target.value)}
 									placeholder="openai"
+									value={backendName}
 								/>
 							</div>
 							<div className="flex flex-col gap-1">
-								<label className="text-xs font-medium text-muted-foreground">Währung</label>
+								<label className="font-medium text-muted-foreground text-xs">
+									Währung
+								</label>
 								<Input
-									value={currency}
-									onChange={(event) => setCurrency(event.target.value.toUpperCase())}
-									placeholder="EUR"
 									maxLength={3}
+									onChange={(event) =>
+										setCurrency(event.target.value.toUpperCase())
+									}
+									placeholder="EUR"
+									value={currency}
 								/>
 							</div>
 							<div className="flex items-center gap-2">
 								<input
-									id="isRegional"
-									type="checkbox"
 									checked={isRegional}
-									onChange={(event) => setIsRegional(event.target.checked)}
 									className="h-4 w-4 rounded border-border"
+									id="isRegional"
+									onChange={(event) => setIsRegional(event.target.checked)}
+									type="checkbox"
 								/>
-								<label htmlFor="isRegional" className="text-sm">
+								<label className="text-sm" htmlFor="isRegional">
 									Regionale Preisgestaltung
 								</label>
 							</div>
@@ -197,7 +216,7 @@ export function CostsClient() {
 								{createCost.isPending ? "Speichern..." : "Eintrag erstellen"}
 							</Button>
 							{createCost.error ? (
-								<span className="text-xs text-destructive">
+								<span className="text-destructive text-xs">
 									Speichern fehlgeschlagen.
 								</span>
 							) : null}
@@ -208,9 +227,9 @@ export function CostsClient() {
 				<CostsTable
 					data={costs}
 					isLoading={isLoading}
+					isMutating={updateCost.isPending || updatePricing.isPending}
 					onUpdateCost={(payload) => updateCost.mutate(payload)}
 					onUpdatePricing={(payload) => updatePricing.mutate(payload)}
-					isMutating={updateCost.isPending || updatePricing.isPending}
 				/>
 			</div>
 

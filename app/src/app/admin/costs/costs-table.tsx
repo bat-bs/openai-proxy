@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import {
 	type ColumnDef,
 	flexRender,
@@ -10,7 +9,8 @@ import {
 	type SortingState,
 	useReactTable,
 } from "@tanstack/react-table";
-import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react";
+import { ChevronDown, ChevronsUpDown, ChevronUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import {
@@ -24,6 +24,10 @@ import {
 } from "~/components/ui/dialog";
 import { Input } from "~/components/ui/input";
 import {
+	NativeSelect,
+	NativeSelectOption,
+} from "~/components/ui/native-select";
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -31,8 +35,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "~/components/ui/table";
-import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
-import { costUnitOptions, type CostUnit } from "~/lib/costs";
+import { type CostUnit, costUnitOptions } from "~/lib/costs";
 
 export type CostRow = {
 	model: string;
@@ -108,7 +111,7 @@ function CostEditDialog({
 	const [unitOfMessure, setUnitOfMessure] = useState<CostUnit>(
 		costUnitOptions.includes((row.unitOfMessure ?? "") as CostUnit)
 			? ((row.unitOfMessure ?? defaultUnit) as CostUnit)
-			: defaultUnit
+			: defaultUnit,
 	);
 	const [isRegional, setIsRegional] = useState(row.isRegional);
 	const [backendName, setBackendName] = useState(row.backendName);
@@ -132,7 +135,7 @@ function CostEditDialog({
 			backendName: row.backendName,
 			currency: row.currency ?? null,
 		}),
-		[row]
+		[row],
 	);
 
 	const today = useMemo(() => todayString(), []);
@@ -140,7 +143,6 @@ function CostEditDialog({
 
 	return (
 		<Dialog
-			open={open}
 			onOpenChange={(nextOpen) => {
 				setOpen(nextOpen);
 				if (nextOpen) {
@@ -155,6 +157,7 @@ function CostEditDialog({
 					setCurrency(row.currency ?? "");
 				}
 			}}
+			open={open}
 		>
 			<DialogTrigger render={<Button size="sm" variant="outline" />}>
 				Bearbeiten
@@ -163,68 +166,83 @@ function CostEditDialog({
 				<DialogHeader>
 					<DialogTitle>Kosten anpassen</DialogTitle>
 					<DialogDescription>
-						Preisaktualisierung erstellt einen neuen Eintrag mit dem heutigen Datum.
+						Preisaktualisierung erstellt einen neuen Eintrag mit dem heutigen
+						Datum.
 					</DialogDescription>
 				</DialogHeader>
 				<div className="grid gap-3">
-					<label className="text-xs font-medium text-muted-foreground">Aktion</label>
+					<label className="font-medium text-muted-foreground text-xs">
+						Aktion
+					</label>
 					<select
-						value={mode}
-						onChange={(event) => setMode(event.target.value as "update" | "modify")}
 						className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+						onChange={(event) =>
+							setMode(event.target.value as "update" | "modify")
+						}
+						value={mode}
 					>
 						<option value="update">Preisaktualisierung (neuer Eintrag)</option>
 						<option value="modify">Preisänderung (bestehender Eintrag)</option>
 					</select>
 					<div className="grid gap-3 md:grid-cols-2">
 						<div className="flex flex-col gap-1">
-							<label className="text-xs font-medium text-muted-foreground">Modell</label>
+							<label className="font-medium text-muted-foreground text-xs">
+								Modell
+							</label>
 							<Input
 								list="costs-models"
-								value={model}
 								onChange={(event) => setModel(event.target.value)}
 								placeholder="gpt-4.1"
+								value={model}
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="text-xs font-medium text-muted-foreground">Token-Typ</label>
+							<label className="font-medium text-muted-foreground text-xs">
+								Token-Typ
+							</label>
 							<Input
-								value={tokenType}
 								onChange={(event) => setTokenType(event.target.value)}
 								placeholder="input"
+								value={tokenType}
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="text-xs font-medium text-muted-foreground">Preis</label>
+							<label className="font-medium text-muted-foreground text-xs">
+								Preis
+							</label>
 							<Input
+								min={0}
+								onChange={(event) => setPrice(event.target.value)}
 								type="number"
 								value={price}
-								onChange={(event) => setPrice(event.target.value)}
-								min={0}
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="text-xs font-medium text-muted-foreground">Gültig ab</label>
+							<label className="font-medium text-muted-foreground text-xs">
+								Gültig ab
+							</label>
 							<Input
+								disabled={mode === "update"}
+								onChange={(event) => setValidFrom(event.target.value)}
 								type="date"
 								value={effectiveValidFrom}
-								onChange={(event) => setValidFrom(event.target.value)}
-								disabled={mode === "update"}
 							/>
 							{mode === "update" ? (
-								<span className="text-xs text-muted-foreground">
+								<span className="text-muted-foreground text-xs">
 									Neuer Eintrag ab {formatDate(today)}
 								</span>
 							) : null}
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="text-xs font-medium text-muted-foreground">Einheit</label>
+							<label className="font-medium text-muted-foreground text-xs">
+								Einheit
+							</label>
 							<NativeSelect
-								value={unitOfMessure}
-							onChange={(event) =>
-								setUnitOfMessure(event.target.value as CostUnit)
-							}
 								className="w-full"
+								onChange={(event) =>
+									setUnitOfMessure(event.target.value as CostUnit)
+								}
+								value={unitOfMessure}
 							>
 								{costUnitOptions.map((unit) => (
 									<NativeSelectOption key={unit} value={unit}>
@@ -234,35 +252,39 @@ function CostEditDialog({
 							</NativeSelect>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="text-xs font-medium text-muted-foreground">Backend</label>
+							<label className="font-medium text-muted-foreground text-xs">
+								Backend
+							</label>
 							<Input
-								value={backendName}
 								onChange={(event) => setBackendName(event.target.value)}
 								placeholder="openai"
+								value={backendName}
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<label className="text-xs font-medium text-muted-foreground">Währung</label>
+							<label className="font-medium text-muted-foreground text-xs">
+								Währung
+							</label>
 							<Input
-								value={currency}
+								maxLength={3}
 								onChange={(event) =>
 									setCurrency(event.target.value.toUpperCase())
 								}
 								placeholder="EUR"
-								maxLength={3}
+								value={currency}
 							/>
 						</div>
 						<div className="flex items-center gap-2">
 							<input
-								id={`costs-regional-${row.model}-${row.tokenType}-${row.price}`}
-								type="checkbox"
 								checked={isRegional}
-								onChange={(event) => setIsRegional(event.target.checked)}
 								className="h-4 w-4 rounded border-border"
+								id={`costs-regional-${row.model}-${row.tokenType}-${row.price}`}
+								onChange={(event) => setIsRegional(event.target.checked)}
+								type="checkbox"
 							/>
 							<label
-								htmlFor={`costs-regional-${row.model}-${row.tokenType}-${row.price}`}
 								className="text-sm"
+								htmlFor={`costs-regional-${row.model}-${row.tokenType}-${row.price}`}
 							>
 								Regionale Preisgestaltung
 							</label>
@@ -301,7 +323,7 @@ function CostEditDialog({
 							{disabled ? "Speichern..." : "Speichern"}
 						</Button>
 					</div>
-			</DialogFooter>
+				</DialogFooter>
 			</DialogContent>
 		</Dialog>
 	);
@@ -334,16 +356,28 @@ export function CostsTable({
 	const filteredData = useMemo(() => {
 		const search = globalFilter.trim().toLowerCase();
 		return data.filter((row) => {
-			if (modelFilter && !row.model.toLowerCase().includes(modelFilter.toLowerCase())) {
+			if (
+				modelFilter &&
+				!row.model.toLowerCase().includes(modelFilter.toLowerCase())
+			) {
 				return false;
 			}
-			if (backendFilter && !row.backendName.toLowerCase().includes(backendFilter.toLowerCase())) {
+			if (
+				backendFilter &&
+				!row.backendName.toLowerCase().includes(backendFilter.toLowerCase())
+			) {
 				return false;
 			}
-			if (tokenFilter && !row.tokenType.toLowerCase().includes(tokenFilter.toLowerCase())) {
+			if (
+				tokenFilter &&
+				!row.tokenType.toLowerCase().includes(tokenFilter.toLowerCase())
+			) {
 				return false;
 			}
-			if (currencyFilter && (row.currency ?? "").toLowerCase() !== currencyFilter.toLowerCase()) {
+			if (
+				currencyFilter &&
+				(row.currency ?? "").toLowerCase() !== currencyFilter.toLowerCase()
+			) {
 				return false;
 			}
 			if (!search) return true;
@@ -361,7 +395,14 @@ export function CostsTable({
 				.map((value) => String(value).toLowerCase())
 				.some((value) => value.includes(search));
 		});
-	}, [backendFilter, currencyFilter, data, globalFilter, modelFilter, tokenFilter]);
+	}, [
+		backendFilter,
+		currencyFilter,
+		data,
+		globalFilter,
+		modelFilter,
+		tokenFilter,
+	]);
 
 	const columns = useMemo<ColumnDef<CostRow>[]>(
 		() => [
@@ -415,15 +456,15 @@ export function CostsTable({
 				header: "Aktion",
 				cell: ({ row }) => (
 					<CostEditDialog
-						row={row.original}
+						disabled={isMutating}
 						onUpdateCost={onUpdateCost}
 						onUpdatePricing={onUpdatePricing}
-						disabled={isMutating}
+						row={row.original}
 					/>
 				),
 			},
 		],
-		[isMutating, onUpdateCost, onUpdatePricing]
+		[isMutating, onUpdateCost, onUpdatePricing],
 	);
 
 	const table = useReactTable({
@@ -442,58 +483,71 @@ export function CostsTable({
 
 	useEffect(() => {
 		setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-	}, [globalFilter, modelFilter, backendFilter, tokenFilter, currencyFilter, data.length]);
+	}, [
+		globalFilter,
+		modelFilter,
+		backendFilter,
+		tokenFilter,
+		currencyFilter,
+		data.length,
+	]);
 
 	const totalRows = table.getFilteredRowModel().rows.length;
-	const startRow = totalRows === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1;
-	const endRow = Math.min(totalRows, (pagination.pageIndex + 1) * pagination.pageSize);
+	const startRow =
+		totalRows === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1;
+	const endRow = Math.min(
+		totalRows,
+		(pagination.pageIndex + 1) * pagination.pageSize,
+	);
 
 	return (
 		<div className="space-y-4">
 			<div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
 				<div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
 					<div>
-						<h2 className="text-sm font-semibold">Preisliste</h2>
-						<p className="text-xs text-muted-foreground">
+						<h2 className="font-semibold text-sm">Preisliste</h2>
+						<p className="text-muted-foreground text-xs">
 							Filtere und durchsuche alle Kosten-Einträge.
 						</p>
 					</div>
-					<div className="text-xs text-muted-foreground">
+					<div className="text-muted-foreground text-xs">
 						{totalRows} Einträge
 					</div>
 				</div>
 				<div className="grid gap-2 md:grid-cols-5">
 					<Input
+						onChange={(event) => setGlobalFilter(event.target.value)}
 						placeholder="Suche"
 						value={globalFilter}
-						onChange={(event) => setGlobalFilter(event.target.value)}
 					/>
 					<Input
+						onChange={(event) => setModelFilter(event.target.value)}
 						placeholder="Modell"
 						value={modelFilter}
-						onChange={(event) => setModelFilter(event.target.value)}
 					/>
 					<Input
+						onChange={(event) => setBackendFilter(event.target.value)}
 						placeholder="Backend"
 						value={backendFilter}
-						onChange={(event) => setBackendFilter(event.target.value)}
 					/>
 					<Input
+						onChange={(event) => setTokenFilter(event.target.value)}
 						placeholder="Token-Typ"
 						value={tokenFilter}
-						onChange={(event) => setTokenFilter(event.target.value)}
 					/>
 					<Input
+						onChange={(event) => setCurrencyFilter(event.target.value)}
 						placeholder="Währung"
 						value={currencyFilter}
-						onChange={(event) => setCurrencyFilter(event.target.value)}
 					/>
 				</div>
-				{globalFilter || modelFilter || backendFilter || tokenFilter || currencyFilter ? (
+				{globalFilter ||
+				modelFilter ||
+				backendFilter ||
+				tokenFilter ||
+				currencyFilter ? (
 					<div>
 						<Button
-							variant="outline"
-							size="sm"
 							onClick={() => {
 								setGlobalFilter("");
 								setModelFilter("");
@@ -501,6 +555,8 @@ export function CostsTable({
 								setTokenFilter("");
 								setCurrencyFilter("");
 							}}
+							size="sm"
+							variant="outline"
 						>
 							Filter zurücksetzen
 						</Button>
@@ -509,25 +565,25 @@ export function CostsTable({
 			</div>
 			<div className="rounded-lg border border-border">
 				<Table className="min-w-full border-separate border-spacing-0 text-sm">
-					<TableHeader className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+					<TableHeader className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
 						{table.getHeaderGroups().map((headerGroup) => (
 							<TableRow key={headerGroup.id}>
 								{headerGroup.headers.map((header) => {
 									const sorted = header.column.getIsSorted();
 									return (
 										<TableHead
+											className="border-border border-b px-4 py-3 text-left"
 											key={header.id}
-											className="border-b border-border px-4 py-3 text-left"
 										>
 											{header.isPlaceholder ? null : (
 												<button
-													type="button"
 													className="inline-flex items-center gap-1"
 													onClick={header.column.getToggleSortingHandler()}
+													type="button"
 												>
 													{flexRender(
 														header.column.columnDef.header,
-														header.getContext()
+														header.getContext(),
 													)}
 													{sorted === "asc" ? (
 														<ChevronUp className="h-3 w-3" />
@@ -548,8 +604,8 @@ export function CostsTable({
 						{isLoading ? (
 							<TableRow>
 								<TableCell
+									className="px-4 py-8 text-center text-muted-foreground text-sm"
 									colSpan={columns.length}
-									className="px-4 py-8 text-center text-sm text-muted-foreground"
 								>
 									Lade Preise...
 								</TableCell>
@@ -558,19 +614,19 @@ export function CostsTable({
 						{!isLoading && table.getRowModel().rows.length === 0 ? (
 							<TableRow>
 								<TableCell
+									className="px-4 py-8 text-center text-muted-foreground text-sm"
 									colSpan={columns.length}
-									className="px-4 py-8 text-center text-sm text-muted-foreground"
 								>
 									Keine Einträge gefunden.
 								</TableCell>
 							</TableRow>
 						) : null}
 						{table.getRowModel().rows.map((row) => (
-							<TableRow key={row.id} className="hover:bg-muted/40">
+							<TableRow className="hover:bg-muted/40" key={row.id}>
 								{row.getVisibleCells().map((cell) => (
 									<TableCell
+										className="border-border border-b px-4 py-3"
 										key={cell.id}
-										className="border-b border-border px-4 py-3"
 									>
 										{flexRender(cell.column.columnDef.cell, cell.getContext())}
 									</TableCell>
@@ -579,11 +635,11 @@ export function CostsTable({
 						))}
 					</TableBody>
 				</Table>
-				<div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-					<div className="flex items-center gap-2 text-xs text-muted-foreground">
+				<div className="flex flex-col gap-2 border-border border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+					<div className="flex items-center gap-2 text-muted-foreground text-xs">
 						<span>Zeilen pro Seite</span>
 						<NativeSelect
-							value={String(pagination.pageSize)}
+							className="w-[90px]"
 							onChange={(event) =>
 								setPagination((prev) => ({
 									...prev,
@@ -591,8 +647,8 @@ export function CostsTable({
 									pageIndex: 0,
 								}))
 							}
-							className="w-[90px]"
 							size="sm"
+							value={String(pagination.pageSize)}
 						>
 							{[10, 20, 50].map((size) => (
 								<NativeSelectOption key={size} value={String(size)}>
@@ -602,39 +658,39 @@ export function CostsTable({
 						</NativeSelect>
 					</div>
 					<div className="flex items-center gap-3">
-						<span className="text-xs text-muted-foreground">
+						<span className="text-muted-foreground text-xs">
 							{startRow}-{endRow} von {totalRows}
 						</span>
 						<div className="flex items-center gap-1">
 							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => table.setPageIndex(0)}
 								disabled={!table.getCanPreviousPage()}
+								onClick={() => table.setPageIndex(0)}
+								size="sm"
+								variant="outline"
 							>
 								Erste
 							</Button>
 							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => table.previousPage()}
 								disabled={!table.getCanPreviousPage()}
+								onClick={() => table.previousPage()}
+								size="sm"
+								variant="outline"
 							>
 								Zurück
 							</Button>
 							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => table.nextPage()}
 								disabled={!table.getCanNextPage()}
+								onClick={() => table.nextPage()}
+								size="sm"
+								variant="outline"
 							>
 								Weiter
 							</Button>
 							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => table.setPageIndex(table.getPageCount() - 1)}
 								disabled={!table.getCanNextPage()}
+								onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+								size="sm"
+								variant="outline"
 							>
 								Letzte
 							</Button>
