@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
 	type ColumnDef,
 	flexRender,
@@ -52,7 +52,13 @@ function formatNumber(value: number) {
 	return numberFormatter.format(value ?? 0);
 }
 
-export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
+export function ApiKeysTable({
+	data,
+	action,
+}: {
+	data: ApiKeyRow[];
+	action?: ReactNode;
+}) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [globalFilter, setGlobalFilter] = useState("");
 	const [pagination, setPagination] = useState({
@@ -151,16 +157,19 @@ export function ApiKeysTable({ data }: { data: ApiKeyRow[] }) {
 	return (
 		<div className="space-y-4">
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<div className="flex flex-1 items-center gap-3">
-					<Input
-						placeholder="Nach ID, Beschreibung oder Tokens filtern"
-						value={globalFilter}
-						onChange={(event) => setGlobalFilter(event.target.value)}
-						className="max-w-sm"
-					/>
+				<div className="flex flex-1 flex-wrap items-center gap-3 justify-between">
+					<div className="flex grow items-center gap-2">
+						<Input
+							placeholder="Nach ID, Beschreibung oder Tokens filtern"
+							value={globalFilter}
+							onChange={(event) => setGlobalFilter(event.target.value)}
+							className="max-w-sm"
+						/>
 					<span className="text-sm text-muted-foreground">
 						{totalRows} API-Key{totalRows === 1 ? "" : "s"}
 					</span>
+					</div>
+					{action ? <div className="shrink-0">{action}</div> : null}
 				</div>
 				{globalFilter ? (
 					<Button variant="outline" size="sm" onClick={() => setGlobalFilter("")}
