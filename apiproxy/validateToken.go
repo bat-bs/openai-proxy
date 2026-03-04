@@ -14,6 +14,9 @@ import (
 func CompareToken(hashes []db.ApiKey, apiKey string) (string, error) {
 
 	for _, hash := range hashes {
+		if hash.Deactivated {
+			continue
+		}
 		err := bcrypt.CompareHashAndPassword([]byte(hash.ApiKey), []byte(apiKey))
 		// log.Printf("Compared %s with %s", apiKey, hash.ApiKey)
 		if err == nil {

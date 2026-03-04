@@ -85,6 +85,7 @@ export const apikeys = pgTable(
 		owner: varchar({ length: 255 }).notNull(),
 		aiapi: varchar({ length: 255 }),
 		description: varchar({ length: 255 }),
+		deactivated: boolean("deactivated").default(false).notNull(),
 	},
 	(table) => [
 		foreignKey({

@@ -21,6 +21,7 @@ type ApiKey struct {
 	Owner                 string // sub from oidc claims or name string on return
 	AiApi                 string // can be openai or azure
 	Description           string // optional, user can describe his key
+	Deactivated           bool
 	TokenCountPrompt      *int
 	TokenCountComplete    *int
 	InputTokenCount       int
@@ -95,7 +96,10 @@ func (d *Database) LookupDatabasePath() string {
 }
 
 func (d *Database) WriteEntry(a *ApiKey) error {
-	_, err := d.db.Exec("INSERT INTO apiKeys VALUES ($1, $2, $3, $4, $5)", a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description)
+	_, err := d.db.Exec(
+		"INSERT INTO apiKeys (UUID, ApiKey, Owner, AiApi, Description, Deactivated) VALUES ($1, $2, $3, $4, $5, $6)",
+		a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description, a.Deactivated,
+	)
 	if err != nil {
 		log.Printf("Api-Key Insert Failed: %v", err)
 		return err
@@ -458,9 +462,9 @@ func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 	var rows *sql.Rows
 	var err error
 	if uid == "*" {
-		rows, err = d.db.Query("SELECT UUID,ApiKey,Owner FROM apiKeys")
+		rows, err = d.db.Query("SELECT UUID, ApiKey, Owner, Deactivated FROM apiKeys")
 	} else {
-		rows, err = d.db.Query("SELECT UUID,ApiKey,Owner FROM apiKeys WHERE Owner=$1", uid)
+		rows, err = d.db.Query("SELECT UUID, ApiKey, Owner, Deactivated FROM apiKeys WHERE Owner=$1", uid)
 	}
 	if err != nil {
 		return nil, err
@@ -468,7 +472,7 @@ func (d *Database) LookupApiKeys(uid string) ([]ApiKey, error) {
 
 	for rows.Next() {
 		var a ApiKey
-		if err := rows.Scan(&a.UUID, &a.ApiKey, &a.Owner); err != nil {
+		if err := rows.Scan(&a.UUID, &a.ApiKey, &a.Owner, &a.Deactivated); err != nil {
 			return apikeys, err
 		}
 		apikeys = append(apikeys, a)
