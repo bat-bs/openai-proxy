@@ -8,14 +8,23 @@ import {
 	SidebarFooter,
 	SidebarHeader,
 } from "~/components/ui/sidebar";
+import { getAppVersion } from "~/lib/release-notes";
 import { auth } from "~/server/auth";
 
 export async function AppSidebar() {
 	const session = await auth();
+	const version = getAppVersion();
 
 	return (
 		<Sidebar variant="inset">
-			<SidebarHeader></SidebarHeader>
+			<SidebarHeader>
+				<Link
+					className="w-full rounded-none px-2 py-1 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+					href="/release-notes"
+				>
+					v{version}
+				</Link>
+			</SidebarHeader>
 			<SidebarContent>
 				<SidebarNav isAdmin={session?.user?.isAdmin ?? false} />
 			</SidebarContent>
