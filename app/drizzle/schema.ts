@@ -114,6 +114,84 @@ export const users = pgTable(
 	],
 );
 
+export const reportingGroups = pgTable(
+	"reporting_groups",
+	{
+		id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({
+			name: "reporting_groups_id_seq",
+			startWith: 1,
+			increment: 1,
+			minValue: 1,
+			// biome-ignore lint/correctness/noPrecisionLoss: matches Postgres BIGINT max.
+			maxValue: 9223372036854775807,
+			cache: 1,
+		}),
+		title: varchar({ length: 255 }).notNull(),
+		createdBy: varchar("created_by", { length: 255 }).notNull(),
+		createdAt: timestamp("created_at", {
+			withTimezone: true,
+			mode: "string",
+		})
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		foreignKey({
+			columns: [table.createdBy],
+			foreignColumns: [users.id],
+			name: "reporting_groups_created_by_fkey",
+		}),
+	],
+);
+
+export const reportingGroupMembers = pgTable(
+	"reporting_group_members",
+	{
+		groupId: bigint("group_id", { mode: "number" }).notNull(),
+		userId: varchar("user_id", { length: 255 }).notNull(),
+	},
+	(table) => [
+		primaryKey({
+			columns: [table.groupId, table.userId],
+			name: "reporting_group_members_pkey",
+		}),
+		foreignKey({
+			columns: [table.groupId],
+			foreignColumns: [reportingGroups.id],
+			name: "reporting_group_members_group_id_fkey",
+		}),
+		foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.id],
+			name: "reporting_group_members_user_id_fkey",
+		}),
+	],
+);
+
+export const reportingGroupViewers = pgTable(
+	"reporting_group_viewers",
+	{
+		groupId: bigint("group_id", { mode: "number" }).notNull(),
+		userId: varchar("user_id", { length: 255 }).notNull(),
+	},
+	(table) => [
+		primaryKey({
+			columns: [table.groupId, table.userId],
+			name: "reporting_group_viewers_pkey",
+		}),
+		foreignKey({
+			columns: [table.groupId],
+			foreignColumns: [reportingGroups.id],
+			name: "reporting_group_viewers_group_id_fkey",
+		}),
+		foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.id],
+			name: "reporting_group_viewers_user_id_fkey",
+		}),
+	],
+);
+
 export const models = pgTable("models", {
 	id: varchar({ length: 255 }).primaryKey().notNull(),
 });
