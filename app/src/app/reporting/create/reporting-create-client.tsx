@@ -164,6 +164,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 	const cumulativeCosts = report?.cumulativeCosts ?? [];
 	const hourlyTokens = report?.hourlyTokens ?? [];
 	const hourlyOutputByDay = report?.hourlyOutputByDay ?? [];
+	const costsUsed = report?.costsUsed ?? [];
 
 	const [sorting, setSorting] = useState<SortState>(null);
 
@@ -245,6 +246,13 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 			}),
 		[],
 	);
+
+	const formatDate = (value: string | null) => {
+		if (!value) return "—";
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return "—";
+		return dateFormatter.format(date);
+	};
 
 	const shortDateFormatter = useMemo(
 		() =>
@@ -739,6 +747,64 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 										colSpan={5}
 									>
 										Keine Benutzer gefunden.
+									</TableCell>
+								</TableRow>
+							) : null}
+						</TableBody>
+					</Table>
+				</div>
+			</div>
+
+			<div className="rounded-none border border-border bg-card p-4">
+				<div className="font-medium text-muted-foreground text-xs">
+					Kostenbasis der Berechnung
+				</div>
+				<div className="mt-4">
+					<Table className="border-collapse text-xs">
+						<TableHeader>
+							<TableRow className="border-border text-left text-[11px] text-muted-foreground uppercase tracking-wide">
+								<TableHead className="pr-3 pb-2 font-medium">Modell</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">
+									Token-Typ
+								</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">Preis</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">Einheit</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">Währung</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">
+									Gültig ab
+								</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{costsUsed.map((cost) => (
+								<TableRow className="border-border/60" key={`${cost.model}-${cost.tokenType}`}>
+									<TableCell className="py-2 pr-3 font-medium">
+										{cost.model}
+									</TableCell>
+									<TableCell className="py-2 pr-3">
+										{cost.tokenType}
+									</TableCell>
+									<TableCell className="py-2 pr-3">
+										{costFormatter.format(cost.price / 100)}
+									</TableCell>
+									<TableCell className="py-2 pr-3">
+										{cost.unit ?? "—"}
+									</TableCell>
+									<TableCell className="py-2 pr-3">
+										{cost.currency ?? "—"}
+									</TableCell>
+									<TableCell className="py-2 pr-3">
+										{formatDate(cost.validFrom)}
+									</TableCell>
+								</TableRow>
+							))}
+							{costsUsed.length === 0 ? (
+								<TableRow>
+									<TableCell
+										className="py-4 text-center text-muted-foreground"
+										colSpan={6}
+									>
+										Keine Kostenbasis verfügbar.
 									</TableCell>
 								</TableRow>
 							) : null}

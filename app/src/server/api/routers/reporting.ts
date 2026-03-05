@@ -426,6 +426,7 @@ export const reportingRouter = createTRPCRouter({
 							avgTokens: 0,
 						})),
 						hourlyOutputByDay: [],
+						costsUsed: [],
 					};
 				}
 			}
@@ -480,6 +481,7 @@ export const reportingRouter = createTRPCRouter({
 						validFrom: string | null;
 						unit: "1M" | "1K" | null;
 						currency: string | null;
+						tokenType: string | null;
 					}
 				>
 			>();
@@ -502,10 +504,46 @@ export const reportingRouter = createTRPCRouter({
 						validFrom: row.validFrom ?? null,
 						unit: (row.unitOfMessure ?? null) as "1M" | "1K" | null,
 						currency: row.currency ? row.currency.trim().toUpperCase() : null,
+						tokenType: row.tokenType ?? null,
 					});
 				}
 				costIndex.set(modelKey, modelMap);
 			}
+
+			const usedCosts = new Map<
+				string,
+				{
+					model: string;
+					tokenType: string;
+					price: number;
+					unit: "1M" | "1K" | null;
+					currency: string | null;
+					validFrom: string | null;
+				}
+			>();
+
+			const registerUsedCost = (
+				model: string,
+				tokenKey: string,
+				entry: {
+					price: number;
+					validFrom: string | null;
+					unit: "1M" | "1K" | null;
+					currency: string | null;
+					tokenType: string | null;
+				},
+			) => {
+				const key = `${normalize(model)}::${tokenKey}`;
+				if (usedCosts.has(key)) return;
+				usedCosts.set(key, {
+					model,
+					tokenType: entry.tokenType ?? tokenKey,
+					price: entry.price,
+					unit: entry.unit,
+					currency: entry.currency,
+					validFrom: entry.validFrom,
+				});
+			};
 
 			const calcTokenCost = (
 				model: string,
@@ -522,13 +560,21 @@ export const reportingRouter = createTRPCRouter({
 							validFrom: string | null;
 							unit: "1M" | "1K" | null;
 							currency: string | null;
+							tokenType: string | null;
 					  }
 					| undefined;
+				let matchedKey: string | null = null;
 				for (const alias of aliases) {
 					entry = modelMap.get(alias);
-					if (entry) break;
+					if (entry) {
+						matchedKey = alias;
+						break;
+					}
 				}
 				if (!entry) return { cost: 0, missing: true, currency: null };
+				if (matchedKey) {
+					registerUsedCost(model, matchedKey, entry);
+				}
 				return {
 					cost:
 						(tokens / unitDivisor(entry.unit)) * priceToCurrency(entry.price),
@@ -863,6 +909,12 @@ export const reportingRouter = createTRPCRouter({
 				models: user.models.sort((a, b) => a.model.localeCompare(b.model)),
 			}));
 
+			const costsUsed = Array.from(usedCosts.values()).sort((a, b) => {
+				const modelSort = a.model.localeCompare(b.model);
+				if (modelSort !== 0) return modelSort;
+				return a.tokenType.localeCompare(b.tokenType);
+			});
+
 			return {
 				summary: {
 					inputTokens: totalInputTokens,
@@ -881,6 +933,7 @@ export const reportingRouter = createTRPCRouter({
 				cumulativeCosts: cumulativeCostSeries,
 				hourlyTokens,
 				hourlyOutputByDay,
+				costsUsed,
 			};
 		}),
 });
