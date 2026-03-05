@@ -1,5 +1,13 @@
 # openai-proxy
 
+## Features
+- OpenAI-compatible API proxy for forwarding requests.
+- Web UI to create and manage API keys (including deactivation).
+- Per-key usage tracking with filtering and sorting in the UI.
+- Admin usage dashboard with range filters (24h, 7d, 30d, all).
+- Admin cost dashboard.
+- Release notes page linked from the sidebar.
+
 ## Build
 ```bash
 git clone git@github.com:bat-bs/openai-proxy.git

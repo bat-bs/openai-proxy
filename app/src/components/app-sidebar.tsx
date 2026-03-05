@@ -17,9 +17,10 @@ export async function AppSidebar() {
 
 	return (
 		<Sidebar variant="inset">
-			<SidebarHeader>
+			<SidebarHeader className="flex flex-col gap-1 items-center">
+			  <span className="font-bold">OpenAI API Proxy</span>	
 				<Link
-					className="w-full rounded-none px-2 py-1 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+					className="flex flex-col items-center  w-full rounded-none px-2 py-1 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
 					href="/release-notes"
 				>
 					v{version}
