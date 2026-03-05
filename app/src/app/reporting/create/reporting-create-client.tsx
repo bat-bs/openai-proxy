@@ -196,7 +196,9 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 	const costsUsed = report?.costsUsed ?? [];
 
 	const [sorting, setSorting] = useState<SortState>(null);
-	const [expandedUsers, setExpandedUsers] = useState<Set<string>>(() => new Set());
+	const [expandedUsers, setExpandedUsers] = useState<Set<string>>(
+		() => new Set(),
+	);
 
 	const sortedUsers = useMemo(() => {
 		if (!sorting) return users;
@@ -437,7 +439,8 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 							) : null}
 							{isPeriodOpen ? (
 								<div className="text-muted-foreground text-xs">
-									Hinweis: Der ausgewählte Zeitraum ist noch nicht abgeschlossen.
+									Hinweis: Der ausgewählte Zeitraum ist noch nicht
+									abgeschlossen.
 								</div>
 							) : null}
 						</div>
@@ -633,26 +636,26 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 									<CartesianGrid strokeDasharray="4 4" />
 									<XAxis
 										dataKey="hour"
-										type="number"
 										domain={[0, 23]}
-										ticks={[0, 4, 8, 12, 16, 20, 23]}
 										tickFormatter={(value) => `${value}:00`}
+										ticks={[0, 4, 8, 12, 16, 20, 23]}
+										type="number"
 									/>
 									<YAxis
 										dataKey="dayIndex"
-										type="number"
 										domain={[0, 6]}
-										ticks={[0, 1, 2, 3, 4, 5, 6]}
 										tickFormatter={(value) =>
 											dayLabelByIndex.get(Number(value)) ?? String(value)
 										}
+										ticks={[0, 1, 2, 3, 4, 5, 6]}
+										type="number"
 										width={40}
 									/>
 									<ZAxis
 										dataKey="outputTokens"
-										type="number"
-										range={[20, 220]}
 										domain={[0, Math.max(1, maxHeatmapTokens)]}
+										range={[20, 220]}
+										type="number"
 									/>
 									<ChartTooltip
 										content={
@@ -668,7 +671,10 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 											/>
 										}
 									/>
-									<Scatter data={heatmapData} fill="var(--color-outputTokens)" />
+									<Scatter
+										data={heatmapData}
+										fill="var(--color-outputTokens)"
+									/>
 								</ScatterChart>
 							</ChartContainer>
 						) : (
@@ -794,7 +800,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 														{formatCost(model.totalCost, model.currency)}
 													</TableCell>
 												</TableRow>
-										  ))
+											))
 										: null}
 								</Fragment>
 							))}
@@ -835,13 +841,14 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 						</TableHeader>
 						<TableBody>
 							{costsUsed.map((cost) => (
-								<TableRow className="border-border/60" key={`${cost.model}-${cost.tokenType}`}>
+								<TableRow
+									className="border-border/60"
+									key={`${cost.model}-${cost.tokenType}`}
+								>
 									<TableCell className="py-2 pr-3 font-medium">
 										{cost.model}
 									</TableCell>
-									<TableCell className="py-2 pr-3">
-										{cost.tokenType}
-									</TableCell>
+									<TableCell className="py-2 pr-3">{cost.tokenType}</TableCell>
 									<TableCell className="py-2 pr-3">
 										{costFormatter.format(cost.price / 100)}
 									</TableCell>

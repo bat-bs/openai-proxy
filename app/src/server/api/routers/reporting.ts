@@ -398,7 +398,7 @@ export const reportingRouter = createTRPCRouter({
 			) {
 				const utcDay = cursor.getUTCDay(); // 0=Sun..6=Sat
 				const dayIndex = utcDay === 0 ? 6 : utcDay - 1; // 0=Mon..6=Sun
-				dayCounts[dayIndex] += 1;
+				dayCounts[dayIndex] = (dayCounts[dayIndex] ?? 0) + 1;
 			}
 
 			let scopedUserIds: string[] | null = null;
@@ -754,10 +754,7 @@ export const reportingRouter = createTRPCRouter({
 				const rawDay = Number(row.day ?? 0);
 				const dayIndex = rawDay === 0 ? 6 : rawDay - 1;
 				const hour = Number(row.hour ?? 0);
-				dayHourTotals.set(
-					`${dayIndex}-${hour}`,
-					Number(row.outputTokens ?? 0),
-				);
+				dayHourTotals.set(`${dayIndex}-${hour}`, Number(row.outputTokens ?? 0));
 			}
 
 			const hourlyOutputByDay = Array.from({ length: 7 }, (_, dayIndex) => {
@@ -877,7 +874,7 @@ export const reportingRouter = createTRPCRouter({
 					});
 
 					if (modelCost !== null) {
-						entry.totalCost += modelCost;
+						entry.totalCost = (entry.totalCost ?? 0) + modelCost;
 						if (entry.currency === null) {
 							entry.currency = modelCurrency;
 						} else if (modelCurrency && entry.currency !== modelCurrency) {

@@ -415,9 +415,9 @@ function UserCombobox({
 							<ComboboxChip key={id}>{userMap.get(id) ?? id}</ComboboxChip>
 						))}
 						<ComboboxChipsInput
+							onChange={(event) => setInputValue(event.target.value)}
 							placeholder="Benutzer auswählen"
 							value={inputValue}
-							onChange={(event) => setInputValue(event.target.value)}
 						/>
 					</ComboboxChips>
 					<ComboboxContent anchor={anchorRef}>
