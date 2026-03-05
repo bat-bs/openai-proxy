@@ -130,6 +130,35 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 		}
 	}, [dailyDate, monthValue, quarterValue, quarterYear, timeframe, yearValue]);
 
+	const selectedPeriodEnd = useMemo(() => {
+		switch (timeframe) {
+			case "daily": {
+				const [year, month, day] = dailyDate.split("-").map(Number);
+				if (!year || !month || !day) return null;
+				return new Date(year, month - 1, day + 1);
+			}
+			case "monthly": {
+				const [year, month] = monthValue.split("-").map(Number);
+				if (!year || !month) return null;
+				return new Date(year, month, 1);
+			}
+			case "quarterly": {
+				const startMonth = (quarterValue - 1) * 3;
+				return new Date(quarterYear, startMonth + 3, 1);
+			}
+			case "yearly": {
+				return new Date(yearValue + 1, 0, 1);
+			}
+			default:
+				return null;
+		}
+	}, [dailyDate, monthValue, quarterValue, quarterYear, timeframe, yearValue]);
+
+	const isPeriodOpen = useMemo(() => {
+		if (!selectedPeriodEnd) return false;
+		return selectedPeriodEnd.getTime() > now.getTime();
+	}, [now, selectedPeriodEnd]);
+
 	const reportEnabled = Boolean(selectedGroupId);
 	const { data: report, isLoading: reportLoading } =
 		api.reporting.getReport.useQuery(
@@ -405,6 +434,11 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 									type="number"
 									value={yearValue}
 								/>
+							) : null}
+							{isPeriodOpen ? (
+								<div className="text-muted-foreground text-xs">
+									Hinweis: Der ausgewählte Zeitraum ist noch nicht abgeschlossen.
+								</div>
 							) : null}
 						</div>
 					</div>
