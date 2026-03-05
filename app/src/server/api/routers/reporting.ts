@@ -756,7 +756,7 @@ export const reportingRouter = createTRPCRouter({
 			let totalInputTokens = 0;
 			let totalCachedTokens = 0;
 			let totalOutputTokens = 0;
-			let totalCost: number | null = 0;
+			let totalCost = 0;
 			let totalCurrency: string | null = null;
 
 			for (const row of usageRows) {
@@ -830,29 +830,28 @@ export const reportingRouter = createTRPCRouter({
 						currency: modelCost === null ? null : modelCurrency,
 					});
 
-					if (entry.totalCost !== null) {
-						entry.totalCost =
-							modelCost === null ? null : entry.totalCost + modelCost;
-						if (entry.totalCost === null) {
-							entry.currency = null;
-						} else if (entry.currency === null) {
+					if (modelCost !== null) {
+						entry.totalCost += modelCost;
+						if (entry.currency === null) {
 							entry.currency = modelCurrency;
 						} else if (modelCurrency && entry.currency !== modelCurrency) {
 							entry.currency = null;
 						}
+					} else {
+						entry.currency = null;
 					}
 
 					modelTotals.set(model, (modelTotals.get(model) ?? 0) + outputTokens);
 
-					if (totalCost !== null) {
-						totalCost = modelCost === null ? null : totalCost + modelCost;
-						if (totalCost === null) {
-							totalCurrency = null;
-						} else if (totalCurrency === null) {
+					if (modelCost !== null) {
+						totalCost += modelCost;
+						if (totalCurrency === null) {
 							totalCurrency = modelCurrency;
 						} else if (modelCurrency && totalCurrency !== modelCurrency) {
 							totalCurrency = null;
 						}
+					} else {
+						totalCurrency = null;
 					}
 				}
 
