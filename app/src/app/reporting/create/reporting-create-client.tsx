@@ -167,6 +167,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 	const costsUsed = report?.costsUsed ?? [];
 
 	const [sorting, setSorting] = useState<SortState>(null);
+	const [expandedUsers, setExpandedUsers] = useState<Set<string>>(() => new Set());
 
 	const sortedUsers = useMemo(() => {
 		if (!sorting) return users;
@@ -197,6 +198,18 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 				return { id, direction: "asc" };
 			}
 			return prev.direction === "asc" ? { id, direction: "desc" } : null;
+		});
+	};
+
+	const toggleExpandedUser = (id: string) => {
+		setExpandedUsers((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) {
+				next.delete(id);
+			} else {
+				next.add(id);
+			}
+			return next;
 		});
 	};
 
@@ -698,7 +711,16 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 								<Fragment key={user.id}>
 									<TableRow className="border-border/60">
 										<TableCell className="py-2 pr-3 font-medium">
-											{user.name}
+											<button
+												className="inline-flex items-center gap-2"
+												onClick={() => toggleExpandedUser(user.id)}
+												type="button"
+											>
+												<span className="text-[11px] text-muted-foreground">
+													{expandedUsers.has(user.id) ? "▾" : "▸"}
+												</span>
+												<span>{user.name}</span>
+											</button>
 										</TableCell>
 										<TableCell className="py-2 pr-3">
 											{numberFormatter.format(user.inputTokens)}
@@ -713,31 +735,33 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 											{formatCost(user.totalCost, user.currency)}
 										</TableCell>
 									</TableRow>
-									{user.models.map((model) => (
-										<TableRow
-											className="border-border/40 text-muted-foreground"
-											key={`${user.id}-${model.model}`}
-										>
-											<TableCell className="py-1.5 pr-3 pl-6">
-												↳ {model.model}
-											</TableCell>
-											<TableCell className="py-1.5 pr-3">
-												{numberFormatter.format(model.inputTokens)} (
-												{formatCost(model.inputCost, model.currency)})
-											</TableCell>
-											<TableCell className="py-1.5 pr-3">
-												{numberFormatter.format(model.cachedInputTokens)} (
-												{formatCost(model.cachedCost, model.currency)})
-											</TableCell>
-											<TableCell className="py-1.5 pr-3">
-												{numberFormatter.format(model.outputTokens)} (
-												{formatCost(model.outputCost, model.currency)})
-											</TableCell>
-											<TableCell className="py-1.5 pr-3 text-right">
-												{formatCost(model.totalCost, model.currency)}
-											</TableCell>
-										</TableRow>
-									))}
+									{expandedUsers.has(user.id)
+										? user.models.map((model) => (
+												<TableRow
+													className="border-border/40 text-muted-foreground"
+													key={`${user.id}-${model.model}`}
+												>
+													<TableCell className="py-1.5 pr-3 pl-6">
+														↳ {model.model}
+													</TableCell>
+													<TableCell className="py-1.5 pr-3">
+														{numberFormatter.format(model.inputTokens)} (
+														{formatCost(model.inputCost, model.currency)})
+													</TableCell>
+													<TableCell className="py-1.5 pr-3">
+														{numberFormatter.format(model.cachedInputTokens)} (
+														{formatCost(model.cachedCost, model.currency)})
+													</TableCell>
+													<TableCell className="py-1.5 pr-3">
+														{numberFormatter.format(model.outputTokens)} (
+														{formatCost(model.outputCost, model.currency)})
+													</TableCell>
+													<TableCell className="py-1.5 pr-3 text-right">
+														{formatCost(model.totalCost, model.currency)}
+													</TableCell>
+												</TableRow>
+										  ))
+										: null}
 								</Fragment>
 							))}
 							{sortedUsers.length === 0 ? (
