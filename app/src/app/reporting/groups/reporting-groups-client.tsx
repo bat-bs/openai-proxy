@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { Button } from "~/components/ui/button";
 import {
@@ -28,18 +29,30 @@ export function ReportingGroupsClient() {
 		onSuccess: async () => {
 			await utils.reporting.listGroupDetails.invalidate();
 			await utils.reporting.listGroups.invalidate();
+			toast.success("Gruppe erstellt.");
+		},
+		onError: () => {
+			toast.error("Gruppe konnte nicht erstellt werden.");
 		},
 	});
 	const updateGroup = api.reporting.updateGroup.useMutation({
 		onSuccess: async () => {
 			await utils.reporting.listGroupDetails.invalidate();
 			await utils.reporting.listGroups.invalidate();
+			toast.success("Gruppe aktualisiert.");
+		},
+		onError: () => {
+			toast.error("Gruppe konnte nicht aktualisiert werden.");
 		},
 	});
 	const deleteGroup = api.reporting.deleteGroup.useMutation({
 		onSuccess: async () => {
 			await utils.reporting.listGroupDetails.invalidate();
 			await utils.reporting.listGroups.invalidate();
+			toast.success("Gruppe gelöscht.");
+		},
+		onError: () => {
+			toast.error("Gruppe konnte nicht gelöscht werden.");
 		},
 	});
 
@@ -380,7 +393,7 @@ function UserCombobox({
 						value: user.id,
 						label: user.name ?? user.id,
 					}))}
-					itemToStringLabel={(value) =>
+					itemToStringValue={(value) =>
 						userMap.get(String(value)) ?? String(value)
 					}
 					multiple
@@ -401,7 +414,11 @@ function UserCombobox({
 						{selected.map((id) => (
 							<ComboboxChip key={id}>{userMap.get(id) ?? id}</ComboboxChip>
 						))}
-						<ComboboxChipsInput placeholder="Benutzer auswählen" />
+						<ComboboxChipsInput
+							placeholder="Benutzer auswählen"
+							value={inputValue}
+							onChange={(event) => setInputValue(event.target.value)}
+						/>
 					</ComboboxChips>
 					<ComboboxContent anchor={anchorRef}>
 						<ComboboxList>

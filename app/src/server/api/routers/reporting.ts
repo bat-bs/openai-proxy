@@ -386,6 +386,20 @@ export const reportingRouter = createTRPCRouter({
 
 			const { start, end } = getDateRange(input.range);
 			const timeFilter = sql`${requests.requestTime} >= ${start.toISOString()} AND ${requests.requestTime} < ${end.toISOString()}`;
+			const dayCount = Math.max(
+				1,
+				Math.ceil((end.getTime() - start.getTime()) / 86_400_000),
+			);
+			const dayCounts = Array.from({ length: 7 }, () => 0);
+			for (
+				const cursor = new Date(start);
+				cursor < end;
+				cursor.setUTCDate(cursor.getUTCDate() + 1)
+			) {
+				const utcDay = cursor.getUTCDay(); // 0=Sun..6=Sat
+				const dayIndex = utcDay === 0 ? 6 : utcDay - 1; // 0=Mon..6=Sun
+				dayCounts[dayIndex] += 1;
+			}
 
 			let scopedUserIds: string[] | null = null;
 			if (groupId !== "all") {
@@ -406,6 +420,12 @@ export const reportingRouter = createTRPCRouter({
 						},
 						modelUsage: [],
 						users: [],
+						cumulativeCosts: [],
+						hourlyTokens: Array.from({ length: 24 }, (_, hour) => ({
+							hour,
+							avgTokens: 0,
+						})),
+						hourlyOutputByDay: [],
 					};
 				}
 			}
@@ -516,6 +536,197 @@ export const reportingRouter = createTRPCRouter({
 					currency: entry.currency,
 				};
 			};
+
+			const scopedConditions = [timeFilter];
+			if (scopedUserIds) {
+				scopedConditions.push(inArray(apikeys.owner, scopedUserIds));
+			}
+			const scopedFilter = and(...scopedConditions);
+
+			const costBucket =
+				input.range.type === "daily"
+					? sql<string>`date_trunc('hour', ${requests.requestTime})`
+					: sql<string>`date_trunc('day', ${requests.requestTime})`;
+
+			const costRowsByBucket = await ctx.db
+				.select({
+					bucket: costBucket.as("bucket"),
+					model: requests.model,
+					inputTokens:
+						sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
+							"inputTokens",
+						),
+					cachedInputTokens:
+						sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
+							"cachedInputTokens",
+						),
+					outputTokens:
+						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
+							"outputTokens",
+						),
+				})
+				.from(requests)
+				.leftJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
+				.where(scopedFilter)
+				.groupBy(costBucket, requests.model);
+
+			const costBuckets = new Map<
+				string,
+				{
+					date: Date;
+					cost: number;
+					currency: string | null;
+					missing: boolean;
+				}
+			>();
+
+			for (const row of costRowsByBucket) {
+				const model = row.model ?? null;
+				const inputTokens = Number(row.inputTokens ?? 0);
+				const cachedTokens = Number(row.cachedInputTokens ?? 0);
+				const outputTokens = Number(row.outputTokens ?? 0);
+
+				if (!model || inputTokens + cachedTokens + outputTokens <= 0) {
+					continue;
+				}
+
+				const bucketValue = row.bucket;
+				if (!bucketValue) continue;
+				const bucketDate = new Date(bucketValue);
+				const bucketKey = bucketDate.toISOString();
+
+				const inputCost = calcTokenCost(model, inputTokens, tokenAliases.input);
+				const cachedCost = calcTokenCost(
+					model,
+					cachedTokens,
+					tokenAliases.cached,
+				);
+				const outputCost = calcTokenCost(
+					model,
+					outputTokens,
+					tokenAliases.output,
+				);
+
+				const modelMissing =
+					inputCost.missing || cachedCost.missing || outputCost.missing;
+				const currencies = [
+					inputCost.currency,
+					cachedCost.currency,
+					outputCost.currency,
+				].filter((value): value is string => Boolean(value));
+				const modelCurrency =
+					currencies.length > 0 &&
+					currencies.every((value) => value === currencies[0])
+						? (currencies[0] ?? null)
+						: null;
+				const modelCost = modelMissing
+					? null
+					: inputCost.cost + cachedCost.cost + outputCost.cost;
+
+				const bucket = costBuckets.get(bucketKey) ?? {
+					date: bucketDate,
+					cost: 0,
+					currency: null,
+					missing: false,
+				};
+
+				if (modelCost === null) {
+					bucket.missing = true;
+				} else {
+					bucket.cost += modelCost;
+					if (bucket.currency === null) {
+						bucket.currency = modelCurrency;
+					} else if (modelCurrency && bucket.currency !== modelCurrency) {
+						bucket.currency = null;
+					}
+				}
+
+				costBuckets.set(bucketKey, bucket);
+			}
+
+			const cumulativeCosts = Array.from(costBuckets.values())
+				.sort((a, b) => a.date.getTime() - b.date.getTime())
+				.map((bucket) => ({
+					date: bucket.date.toISOString(),
+					cost: bucket.missing ? null : bucket.cost,
+				}));
+
+			let runningCost = 0;
+			let runningMissing = false;
+			const cumulativeCostSeries = cumulativeCosts.map((bucket) => {
+				if (runningMissing || bucket.cost === null) {
+					runningMissing = true;
+					return { date: bucket.date, cumulativeCost: null };
+				}
+				runningCost += bucket.cost;
+				return { date: bucket.date, cumulativeCost: runningCost };
+			});
+
+			const hourBucket = sql<number>`extract(hour from ${requests.requestTime})`;
+			const hourlyRows = await ctx.db
+				.select({
+					hour: hourBucket.as("hour"),
+					totalTokens:
+						sql<number>`coalesce(sum(${requests.inputTokenCount} + ${requests.cachedInputTokenCount} + ${requests.outputTokenCount}), 0)`.as(
+							"totalTokens",
+						),
+				})
+				.from(requests)
+				.leftJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
+				.where(scopedFilter)
+				.groupBy(hourBucket);
+
+			const hourlyTotals = new Map<number, number>();
+			for (const row of hourlyRows) {
+				const hour = Number(row.hour ?? 0);
+				hourlyTotals.set(hour, Number(row.totalTokens ?? 0));
+			}
+
+			const hourlyTokens = Array.from({ length: 24 }, (_, hour) => ({
+				hour,
+				avgTokens: (hourlyTotals.get(hour) ?? 0) / dayCount,
+			}));
+
+			const dayBucket = sql<number>`extract(dow from ${requests.requestTime})`;
+			const hourlyDayRows = await ctx.db
+				.select({
+					day: dayBucket.as("day"),
+					hour: hourBucket.as("hour"),
+					outputTokens:
+						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
+							"outputTokens",
+						),
+				})
+				.from(requests)
+				.leftJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
+				.where(scopedFilter)
+				.groupBy(dayBucket, hourBucket);
+
+			const dayLabels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+			const dayHourTotals = new Map<string, number>();
+			for (const row of hourlyDayRows) {
+				const rawDay = Number(row.day ?? 0);
+				const dayIndex = rawDay === 0 ? 6 : rawDay - 1;
+				const hour = Number(row.hour ?? 0);
+				dayHourTotals.set(
+					`${dayIndex}-${hour}`,
+					Number(row.outputTokens ?? 0),
+				);
+			}
+
+			const hourlyOutputByDay = Array.from({ length: 7 }, (_, dayIndex) => {
+				const dayLabel = dayLabels[dayIndex] ?? String(dayIndex);
+				const divisor = dayCounts[dayIndex] || 0;
+				return Array.from({ length: 24 }, (_, hour) => ({
+					dayIndex,
+					dayLabel,
+					hour,
+					outputTokens:
+						divisor > 0
+							? (dayHourTotals.get(`${dayIndex}-${hour}`) ?? 0) / divisor
+							: 0,
+				}));
+			}).flat();
 
 			const usersMap = new Map<
 				string,
@@ -668,6 +879,9 @@ export const reportingRouter = createTRPCRouter({
 					}))
 					.sort((a, b) => b.outputTokens - a.outputTokens),
 				users: usersData,
+				cumulativeCosts: cumulativeCostSeries,
+				hourlyTokens,
+				hourlyOutputByDay,
 			};
 		}),
 });

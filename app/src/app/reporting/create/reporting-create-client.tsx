@@ -2,7 +2,20 @@
 
 import { ChevronDown, ChevronsUpDown, ChevronUp } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Pie, PieChart } from "recharts";
+import {
+	Area,
+	AreaChart,
+	Bar,
+	BarChart,
+	CartesianGrid,
+	Pie,
+	PieChart,
+	Scatter,
+	ScatterChart,
+	XAxis,
+	YAxis,
+	ZAxis,
+} from "recharts";
 
 import {
 	type ChartConfig,
@@ -148,6 +161,9 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 	const summary = report?.summary;
 	const modelUsage = report?.modelUsage ?? [];
 	const users = report?.users ?? [];
+	const cumulativeCosts = report?.cumulativeCosts ?? [];
+	const hourlyTokens = report?.hourlyTokens ?? [];
+	const hourlyOutputByDay = report?.hourlyOutputByDay ?? [];
 
 	const [sorting, setSorting] = useState<SortState>(null);
 
@@ -200,6 +216,75 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 		};
 		return acc;
 	}, {});
+
+	const costChartConfig: ChartConfig = {
+		cumulativeCost: {
+			label: "Kumulierte Kosten",
+			color: chartColors[1],
+		},
+	};
+
+	const hourlyChartConfig: ChartConfig = {
+		avgTokens: {
+			label: "Ø Tokens pro Stunde",
+			color: chartColors[2],
+		},
+	};
+
+	const heatmapChartConfig: ChartConfig = {
+		outputTokens: {
+			label: "Ø Output-Tokens",
+			color: chartColors[3],
+		},
+	};
+
+	const dateFormatter = useMemo(
+		() =>
+			new Intl.DateTimeFormat("de-DE", {
+				dateStyle: "medium",
+			}),
+		[],
+	);
+
+	const shortDateFormatter = useMemo(
+		() =>
+			new Intl.DateTimeFormat("de-DE", {
+				month: "short",
+				day: "2-digit",
+			}),
+		[],
+	);
+
+	const cumulativeCostAvailable = useMemo(
+		() => cumulativeCosts.some((item) => item.cumulativeCost !== null),
+		[cumulativeCosts],
+	);
+
+	const hourlyTokensTotal = useMemo(
+		() => hourlyTokens.reduce((acc, item) => acc + item.avgTokens, 0),
+		[hourlyTokens],
+	);
+
+	const dayLabelByIndex = useMemo(() => {
+		const map = new Map<number, string>();
+		for (const item of hourlyOutputByDay) {
+			map.set(item.dayIndex, item.dayLabel);
+		}
+		return map;
+	}, [hourlyOutputByDay]);
+
+	const heatmapData = useMemo(
+		() => hourlyOutputByDay.filter((item) => item.outputTokens > 0),
+		[hourlyOutputByDay],
+	);
+
+	const maxHeatmapTokens = useMemo(() => {
+		let max = 0;
+		for (const item of heatmapData) {
+			max = Math.max(max, item.outputTokens);
+		}
+		return max;
+	}, [heatmapData]);
 
 	if (!isAdmin && !groupsLoading && availableGroups.length === 0) {
 		return (
@@ -351,7 +436,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 				) : null}
 			</div>
 
-			<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+			<div className="grid gap-6 lg:grid-cols-2">
 				<div className="rounded-none border border-border bg-card p-4">
 					<div className="font-medium text-muted-foreground text-xs">
 						Modelle nach Output-Tokens
@@ -384,126 +469,281 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 
 				<div className="rounded-none border border-border bg-card p-4">
 					<div className="font-medium text-muted-foreground text-xs">
-						Nutzung nach Benutzer
+						Kumulierte Kosten
 					</div>
 					<div className="mt-4">
-						<Table className="border-collapse text-xs">
-							<TableHeader>
-								<TableRow className="border-border text-left text-[11px] text-muted-foreground uppercase tracking-wide">
-									<TableHead className="pr-3 pb-2 font-medium">
-										<SortButton
-											active={sorting?.id === "name" ? sorting.direction : null}
-											onClick={() => toggleSorting("name")}
-										>
-											Benutzer / Modell
-										</SortButton>
-									</TableHead>
-									<TableHead className="pr-3 pb-2 font-medium">
-										<SortButton
-											active={
-												sorting?.id === "inputTokens" ? sorting.direction : null
-											}
-											onClick={() => toggleSorting("inputTokens")}
-										>
-											Input-Tokens
-										</SortButton>
-									</TableHead>
-									<TableHead className="pr-3 pb-2 font-medium">
-										<SortButton
-											active={
-												sorting?.id === "cachedInputTokens"
-													? sorting.direction
-													: null
-											}
-											onClick={() => toggleSorting("cachedInputTokens")}
-										>
-											Cache-Tokens
-										</SortButton>
-									</TableHead>
-									<TableHead className="pr-3 pb-2 font-medium">
-										<SortButton
-											active={
-												sorting?.id === "outputTokens"
-													? sorting.direction
-													: null
-											}
-											onClick={() => toggleSorting("outputTokens")}
-										>
-											Output-Tokens
-										</SortButton>
-									</TableHead>
-									<TableHead className="pr-3 pb-2 text-right font-medium">
-										<SortButton
-											active={
-												sorting?.id === "totalCost" ? sorting.direction : null
-											}
-											onClick={() => toggleSorting("totalCost")}
-										>
-											Gesamtkosten
-										</SortButton>
-									</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{sortedUsers.map((user) => (
-									<Fragment key={user.id}>
-										<TableRow className="border-border/60">
-											<TableCell className="py-2 pr-3 font-medium">
-												{user.name}
-											</TableCell>
-											<TableCell className="py-2 pr-3">
-												{numberFormatter.format(user.inputTokens)}
-											</TableCell>
-											<TableCell className="py-2 pr-3">
-												{numberFormatter.format(user.cachedInputTokens)}
-											</TableCell>
-											<TableCell className="py-2 pr-3">
-												{numberFormatter.format(user.outputTokens)}
-											</TableCell>
-											<TableCell className="py-2 pr-3 text-right">
-												{formatCost(user.totalCost, user.currency)}
-											</TableCell>
-										</TableRow>
-										{user.models.map((model) => (
-											<TableRow
-												className="border-border/40 text-muted-foreground"
-												key={`${user.id}-${model.model}`}
-											>
-												<TableCell className="py-1.5 pr-3 pl-6">
-													↳ {model.model}
-												</TableCell>
-												<TableCell className="py-1.5 pr-3">
-													{numberFormatter.format(model.inputTokens)} (
-													{formatCost(model.inputCost, model.currency)})
-												</TableCell>
-												<TableCell className="py-1.5 pr-3">
-													{numberFormatter.format(model.cachedInputTokens)} (
-													{formatCost(model.cachedCost, model.currency)})
-												</TableCell>
-												<TableCell className="py-1.5 pr-3">
-													{numberFormatter.format(model.outputTokens)} (
-													{formatCost(model.outputCost, model.currency)})
-												</TableCell>
-												<TableCell className="py-1.5 pr-3 text-right">
-													{formatCost(model.totalCost, model.currency)}
-												</TableCell>
-											</TableRow>
-										))}
-									</Fragment>
-								))}
-								{sortedUsers.length === 0 ? (
-									<TableRow>
-										<TableCell
-											className="py-4 text-center text-muted-foreground"
-											colSpan={5}
-										>
-											Keine Benutzer gefunden.
+						{cumulativeCostAvailable ? (
+							<ChartContainer className="h-72" config={costChartConfig}>
+								<AreaChart data={cumulativeCosts}>
+									<CartesianGrid strokeDasharray="4 4" />
+									<XAxis
+										dataKey="date"
+										minTickGap={16}
+										tickFormatter={(value) =>
+											shortDateFormatter.format(new Date(value))
+										}
+									/>
+									<YAxis
+										tickFormatter={(value) =>
+											costFormatter.format(Number(value))
+										}
+										width={56}
+									/>
+									<ChartTooltip
+										content={
+											<ChartTooltipContent
+												formatter={(value) =>
+													value === null
+														? "—"
+														: formatCost(
+																Number(value),
+																summary?.currency ?? "EUR",
+															)
+												}
+												labelFormatter={(value) =>
+													dateFormatter.format(new Date(value as string))
+												}
+											/>
+										}
+									/>
+									<Area
+										dataKey="cumulativeCost"
+										fill="var(--color-cumulativeCost)"
+										fillOpacity={0.2}
+										stroke="var(--color-cumulativeCost)"
+										type="monotone"
+									/>
+								</AreaChart>
+							</ChartContainer>
+						) : (
+							<div className="text-muted-foreground text-xs">
+								Keine Kostendaten für den Zeitraum verfügbar.
+							</div>
+						)}
+					</div>
+				</div>
+
+				<div className="rounded-none border border-border bg-card p-4">
+					<div className="font-medium text-muted-foreground text-xs">
+						Stündliche Token-Verteilung (Ø)
+					</div>
+					<div className="mt-4">
+						{hourlyTokensTotal > 0 ? (
+							<ChartContainer className="h-72" config={hourlyChartConfig}>
+								<BarChart data={hourlyTokens}>
+									<CartesianGrid strokeDasharray="4 4" />
+									<XAxis
+										dataKey="hour"
+										tickFormatter={(value) => `${value}:00`}
+									/>
+									<YAxis
+										tickFormatter={(value) =>
+											numberFormatter.format(Number(value))
+										}
+										width={44}
+									/>
+									<ChartTooltip
+										content={
+											<ChartTooltipContent
+												formatter={(value) =>
+													numberFormatter.format(Number(value))
+												}
+												labelFormatter={(value) => `${value}:00`}
+											/>
+										}
+									/>
+									<Bar
+										dataKey="avgTokens"
+										fill="var(--color-avgTokens)"
+										radius={[2, 2, 0, 0]}
+									/>
+								</BarChart>
+							</ChartContainer>
+						) : (
+							<div className="text-muted-foreground text-xs">
+								Keine Tokens für den Zeitraum gefunden.
+							</div>
+						)}
+					</div>
+				</div>
+
+				<div className="rounded-none border border-border bg-card p-4">
+					<div className="font-medium text-muted-foreground text-xs">
+						Output-Tokens nach Wochentag & Stunde
+					</div>
+					<div className="mt-4">
+						{heatmapData.length ? (
+							<ChartContainer className="h-72" config={heatmapChartConfig}>
+								<ScatterChart data={heatmapData}>
+									<CartesianGrid strokeDasharray="4 4" />
+									<XAxis
+										dataKey="hour"
+										type="number"
+										domain={[0, 23]}
+										ticks={[0, 4, 8, 12, 16, 20, 23]}
+										tickFormatter={(value) => `${value}:00`}
+									/>
+									<YAxis
+										dataKey="dayIndex"
+										type="number"
+										domain={[0, 6]}
+										ticks={[0, 1, 2, 3, 4, 5, 6]}
+										tickFormatter={(value) =>
+											dayLabelByIndex.get(Number(value)) ?? String(value)
+										}
+										width={40}
+									/>
+									<ZAxis
+										dataKey="outputTokens"
+										type="number"
+										range={[20, 220]}
+										domain={[0, Math.max(1, maxHeatmapTokens)]}
+									/>
+									<ChartTooltip
+										content={
+											<ChartTooltipContent
+												formatter={(value) =>
+													`${numberFormatter.format(Number(value))} Tokens`
+												}
+												labelFormatter={(_, payload) => {
+													const item = payload?.[0]?.payload;
+													if (!item) return "";
+													return `${item.dayLabel}, ${item.hour} Uhr`;
+												}}
+											/>
+										}
+									/>
+									<Scatter data={heatmapData} fill="var(--color-outputTokens)" />
+								</ScatterChart>
+							</ChartContainer>
+						) : (
+							<div className="text-muted-foreground text-xs">
+								Keine Daten für den Zeitraum gefunden.
+							</div>
+						)}
+					</div>
+				</div>
+			</div>
+
+			<div className="rounded-none border border-border bg-card p-4">
+				<div className="font-medium text-muted-foreground text-xs">
+					Nutzung nach Benutzer
+				</div>
+				<div className="mt-4">
+					<Table className="border-collapse text-xs">
+						<TableHeader>
+							<TableRow className="border-border text-left text-[11px] text-muted-foreground uppercase tracking-wide">
+								<TableHead className="pr-3 pb-2 font-medium">
+									<SortButton
+										active={sorting?.id === "name" ? sorting.direction : null}
+										onClick={() => toggleSorting("name")}
+									>
+										Benutzer / Modell
+									</SortButton>
+								</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">
+									<SortButton
+										active={
+											sorting?.id === "inputTokens" ? sorting.direction : null
+										}
+										onClick={() => toggleSorting("inputTokens")}
+									>
+										Input-Tokens
+									</SortButton>
+								</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">
+									<SortButton
+										active={
+											sorting?.id === "cachedInputTokens"
+												? sorting.direction
+												: null
+										}
+										onClick={() => toggleSorting("cachedInputTokens")}
+									>
+										Cache-Tokens
+									</SortButton>
+								</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">
+									<SortButton
+										active={
+											sorting?.id === "outputTokens" ? sorting.direction : null
+										}
+										onClick={() => toggleSorting("outputTokens")}
+									>
+										Output-Tokens
+									</SortButton>
+								</TableHead>
+								<TableHead className="pr-3 pb-2 text-right font-medium">
+									<SortButton
+										active={
+											sorting?.id === "totalCost" ? sorting.direction : null
+										}
+										onClick={() => toggleSorting("totalCost")}
+									>
+										Gesamtkosten
+									</SortButton>
+								</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{sortedUsers.map((user) => (
+								<Fragment key={user.id}>
+									<TableRow className="border-border/60">
+										<TableCell className="py-2 pr-3 font-medium">
+											{user.name}
+										</TableCell>
+										<TableCell className="py-2 pr-3">
+											{numberFormatter.format(user.inputTokens)}
+										</TableCell>
+										<TableCell className="py-2 pr-3">
+											{numberFormatter.format(user.cachedInputTokens)}
+										</TableCell>
+										<TableCell className="py-2 pr-3">
+											{numberFormatter.format(user.outputTokens)}
+										</TableCell>
+										<TableCell className="py-2 pr-3 text-right">
+											{formatCost(user.totalCost, user.currency)}
 										</TableCell>
 									</TableRow>
-								) : null}
-							</TableBody>
-						</Table>
-					</div>
+									{user.models.map((model) => (
+										<TableRow
+											className="border-border/40 text-muted-foreground"
+											key={`${user.id}-${model.model}`}
+										>
+											<TableCell className="py-1.5 pr-3 pl-6">
+												↳ {model.model}
+											</TableCell>
+											<TableCell className="py-1.5 pr-3">
+												{numberFormatter.format(model.inputTokens)} (
+												{formatCost(model.inputCost, model.currency)})
+											</TableCell>
+											<TableCell className="py-1.5 pr-3">
+												{numberFormatter.format(model.cachedInputTokens)} (
+												{formatCost(model.cachedCost, model.currency)})
+											</TableCell>
+											<TableCell className="py-1.5 pr-3">
+												{numberFormatter.format(model.outputTokens)} (
+												{formatCost(model.outputCost, model.currency)})
+											</TableCell>
+											<TableCell className="py-1.5 pr-3 text-right">
+												{formatCost(model.totalCost, model.currency)}
+											</TableCell>
+										</TableRow>
+									))}
+								</Fragment>
+							))}
+							{sortedUsers.length === 0 ? (
+								<TableRow>
+									<TableCell
+										className="py-4 text-center text-muted-foreground"
+										colSpan={5}
+									>
+										Keine Benutzer gefunden.
+									</TableCell>
+								</TableRow>
+							) : null}
+						</TableBody>
+					</Table>
 				</div>
 			</div>
 		</div>
