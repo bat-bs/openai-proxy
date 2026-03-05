@@ -3,13 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import {
+	Combobox,
+	ComboboxChip,
+	ComboboxChips,
+	ComboboxChipsInput,
+	ComboboxContent,
+	ComboboxEmpty,
+	ComboboxItem,
+	ComboboxList,
+	useComboboxAnchor,
+} from "~/components/ui/combobox";
 import { Input } from "~/components/ui/input";
 import { api } from "~/trpc/react";
-
-const toggleValue = (values: string[], value: string) =>
-	values.includes(value)
-		? values.filter((item) => item !== value)
-		: [...values, value];
 
 export function ReportingGroupsClient() {
 	const utils = api.useUtils();
@@ -37,6 +43,7 @@ export function ReportingGroupsClient() {
 		},
 	});
 
+	const [dialogOpen, setDialogOpen] = useState(false);
 	const [newTitle, setNewTitle] = useState("");
 	const [newMemberIds, setNewMemberIds] = useState<string[]>([]);
 	const [newViewerIds, setNewViewerIds] = useState<string[]>([]);
@@ -56,7 +63,33 @@ export function ReportingGroupsClient() {
 				viewerIds: group.viewerIds,
 			};
 		}
-		setDrafts(next);
+
+		setDrafts((prev) => {
+			const prevKeys = Object.keys(prev);
+			const nextKeys = Object.keys(next);
+			if (prevKeys.length !== nextKeys.length) return next;
+			for (const key of nextKeys) {
+				const prevEntry = prev[key];
+				const nextEntry = next[key];
+				if (!prevEntry || !nextEntry) return next;
+				if (prevEntry.title !== nextEntry.title) return next;
+				if (
+					prevEntry.memberIds.length !== nextEntry.memberIds.length ||
+					prevEntry.viewerIds.length !== nextEntry.viewerIds.length
+				) {
+					return next;
+				}
+				if (
+					[...prevEntry.memberIds].sort().join("|") !==
+						[...nextEntry.memberIds].sort().join("|") ||
+					[...prevEntry.viewerIds].sort().join("|") !==
+						[...nextEntry.viewerIds].sort().join("|")
+				) {
+					return next;
+				}
+			}
+			return prev;
+		});
 	}, [groups]);
 
 	const usersReady = !usersLoading && users.length > 0;
@@ -74,62 +107,100 @@ export function ReportingGroupsClient() {
 
 	return (
 		<div className="flex flex-col gap-8">
-			<div className="rounded-none border border-border bg-card p-5">
-				<h2 className="font-medium text-sm">Neue Abrechnungsgruppe</h2>
-				<div className="mt-4 grid gap-4 lg:grid-cols-[1fr_minmax(0,2fr)]">
-					<div className="space-y-3">
-						<label
-							className="font-medium text-muted-foreground text-xs"
-							htmlFor="new-group-title"
-						>
-							Titel
-						</label>
-						<Input
-							id="new-group-title"
-							onChange={(event) => setNewTitle(event.target.value)}
-							placeholder="z.B. Produktteam"
-							value={newTitle}
-						/>
-						<div className="flex gap-2">
-							<Button
-								disabled={!canCreate || createGroup.isPending}
-								onClick={() => {
-									createGroup.mutate({
-										title: newTitle.trim(),
-										memberIds: newMemberIds,
-										viewerIds: newViewerIds,
-									});
-									setNewTitle("");
-									setNewMemberIds([]);
-									setNewViewerIds([]);
-								}}
+			<div className="flex flex-wrap items-center justify-between gap-3 rounded-none border border-border bg-card p-5">
+				<div>
+					<h2 className="font-medium text-sm">Neue Abrechnungsgruppe</h2>
+					<p className="text-muted-foreground text-xs">
+						Lege neue Gruppen für das Reporting an.
+					</p>
+				</div>
+				<Button
+					onClick={() => {
+						setDialogOpen((prev) => !prev);
+						if (dialogOpen) {
+							setNewTitle("");
+							setNewMemberIds([]);
+							setNewViewerIds([]);
+							createGroup.reset();
+						}
+					}}
+					variant={dialogOpen ? "outline" : "default"}
+				>
+					{dialogOpen ? "Eingabe schließen" : "Neue Gruppe anlegen"}
+				</Button>
+			</div>
+			{dialogOpen ? (
+				<div className="rounded-none border border-border bg-card p-5">
+					<div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,2fr)]">
+						<div className="space-y-3">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor="new-group-title"
 							>
-								Gruppe anlegen
-							</Button>
+								Titel
+							</label>
+							<Input
+								id="new-group-title"
+								onChange={(event) => setNewTitle(event.target.value)}
+								placeholder="z.B. Produktteam"
+								value={newTitle}
+							/>
+						</div>
+						<div className="grid gap-4 md:grid-cols-2">
+							<UserCombobox
+								description="Benutzer, deren Nutzung im Bericht enthalten ist."
+								label="Mitglieder"
+								onChange={setNewMemberIds}
+								selected={newMemberIds}
+								users={users}
+							/>
+							<UserCombobox
+								description="Benutzer, die diese Gruppe im Reporting sehen dürfen."
+								label="Berechtigte"
+								onChange={setNewViewerIds}
+								selected={newViewerIds}
+								users={users}
+							/>
 						</div>
 					</div>
-					<div className="grid gap-4 md:grid-cols-2">
-						<UserChecklist
-							description="Benutzer, deren Nutzung im Bericht enthalten ist."
-							label="Mitglieder"
-							onToggle={(id) =>
-								setNewMemberIds((prev) => toggleValue(prev, id))
-							}
-							selected={newMemberIds}
-							users={users}
-						/>
-						<UserChecklist
-							description="Benutzer, die diese Gruppe im Reporting sehen dürfen."
-							label="Berechtigte"
-							onToggle={(id) =>
-								setNewViewerIds((prev) => toggleValue(prev, id))
-							}
-							selected={newViewerIds}
-							users={users}
-						/>
+					<div className="mt-4 flex flex-wrap items-center gap-2">
+						<Button
+							disabled={!canCreate || createGroup.isPending}
+							onClick={() => {
+								createGroup.mutate({
+									title: newTitle.trim(),
+									memberIds: newMemberIds,
+									viewerIds: newViewerIds,
+								});
+								setDialogOpen(false);
+								setNewTitle("");
+								setNewMemberIds([]);
+								setNewViewerIds([]);
+								createGroup.reset();
+							}}
+						>
+							{createGroup.isPending ? "Wird erstellt..." : "Gruppe anlegen"}
+						</Button>
+						<Button
+							onClick={() => {
+								setDialogOpen(false);
+								setNewTitle("");
+								setNewMemberIds([]);
+								setNewViewerIds([]);
+								createGroup.reset();
+							}}
+							variant="outline"
+						>
+							Abbrechen
+						</Button>
+						{createGroup.error ? (
+							<span className="text-destructive text-xs">
+								Gruppe konnte nicht erstellt werden.
+							</span>
+						) : null}
 					</div>
 				</div>
-			</div>
+			) : null}
 
 			<div className="grid gap-6">
 				{groupsReady ? (
@@ -211,30 +282,30 @@ export function ReportingGroupsClient() {
 										</div>
 									</div>
 									<div className="grid gap-4 md:grid-cols-2">
-										<UserChecklist
+										<UserCombobox
 											description="Benutzer, die im Bericht ausgewiesen werden."
 											label="Mitglieder"
-											onToggle={(id) =>
+											onChange={(next) =>
 												setDrafts((prev) => ({
 													...prev,
 													[group.id]: {
 														...draft,
-														memberIds: toggleValue(draft.memberIds, id),
+														memberIds: next,
 													},
 												}))
 											}
 											selected={draft.memberIds}
 											users={users}
 										/>
-										<UserChecklist
+										<UserCombobox
 											description="Benutzer, die Reports dieser Gruppe sehen dürfen."
 											label="Berechtigte"
-											onToggle={(id) =>
+											onChange={(next) =>
 												setDrafts((prev) => ({
 													...prev,
 													[group.id]: {
 														...draft,
-														viewerIds: toggleValue(draft.viewerIds, id),
+														viewerIds: next,
 													},
 												}))
 											}
@@ -265,39 +336,84 @@ export function ReportingGroupsClient() {
 	);
 }
 
-function UserChecklist({
+function UserCombobox({
 	label,
 	description,
 	users,
 	selected,
-	onToggle,
+	onChange,
 }: {
 	label: string;
 	description: string;
 	users: Array<{ id: string; name: string | null }>;
 	selected: string[];
-	onToggle: (id: string) => void;
+	onChange: (ids: string[]) => void;
 }) {
+	const anchorRef = useComboboxAnchor();
+	const [inputValue, setInputValue] = useState("");
+	const userMap = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const user of users) {
+			map.set(user.id, user.name ?? user.id);
+		}
+		return map;
+	}, [users]);
+	const filteredUsers = useMemo(() => {
+		const query = inputValue.trim().toLowerCase();
+		if (!query) return users;
+		return users.filter((user) => {
+			const displayName = (user.name ?? user.id).toLowerCase();
+			return (
+				displayName.includes(query) || user.id.toLowerCase().includes(query)
+			);
+		});
+	}, [inputValue, users]);
+
 	return (
 		<div className="rounded-none border border-border p-3">
 			<div className="font-medium text-muted-foreground text-xs">{label}</div>
 			<p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
-			<div className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
-				{users.map((user) => (
-					<label className="flex items-center gap-2 text-xs" key={user.id}>
-						<input
-							checked={selected.includes(user.id)}
-							onChange={() => onToggle(user.id)}
-							type="checkbox"
-						/>
-						<span className="truncate">{user.name ?? user.id}</span>
-					</label>
-				))}
-				{!users.length ? (
-					<div className="text-[11px] text-muted-foreground">
-						Keine Benutzer verfügbar.
-					</div>
-				) : null}
+			<div className="mt-3">
+				<Combobox
+					inputValue={inputValue}
+					items={filteredUsers.map((user) => ({
+						value: user.id,
+						label: user.name ?? user.id,
+					}))}
+					itemToStringLabel={(value) =>
+						userMap.get(String(value)) ?? String(value)
+					}
+					multiple
+					onInputValueChange={(value) => {
+						const next =
+							typeof value === "string"
+								? value
+								: (value as { inputValue?: string } | null)?.inputValue;
+						setInputValue(String(next ?? ""));
+					}}
+					onValueChange={(value) => {
+						onChange(Array.isArray(value) ? value : []);
+						setInputValue("");
+					}}
+					value={selected}
+				>
+					<ComboboxChips ref={anchorRef}>
+						{selected.map((id) => (
+							<ComboboxChip key={id}>{userMap.get(id) ?? id}</ComboboxChip>
+						))}
+						<ComboboxChipsInput placeholder="Benutzer auswählen" />
+					</ComboboxChips>
+					<ComboboxContent anchor={anchorRef}>
+						<ComboboxList>
+							{(item) => (
+								<ComboboxItem key={item.value} value={item.value}>
+									{item.label ?? item.value}
+								</ComboboxItem>
+							)}
+						</ComboboxList>
+						<ComboboxEmpty>Keine Benutzer gefunden.</ComboboxEmpty>
+					</ComboboxContent>
+				</Combobox>
 			</div>
 		</div>
 	);
