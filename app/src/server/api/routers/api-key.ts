@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { hash } from "bcryptjs";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
@@ -44,6 +44,7 @@ export const apiKeyRouter = createTRPCRouter({
 			.select({
 				id: apikeys.uuid,
 				description: apikeys.description,
+				deactivated: apikeys.deactivated,
 				model: requests.model,
 				inputTokens:
 					sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
@@ -65,7 +66,12 @@ export const apiKeyRouter = createTRPCRouter({
 			.innerJoin(users, eq(apikeys.owner, users.id))
 			.leftJoin(requests, eq(apikeys.uuid, requests.apiKeyId))
 			.where(eq(users.id, userId))
-			.groupBy(apikeys.uuid, apikeys.description, requests.model);
+			.groupBy(
+				apikeys.uuid,
+				apikeys.description,
+				apikeys.deactivated,
+				requests.model,
+			);
 
 		const costRows = await ctx.db
 			.select({
@@ -170,6 +176,7 @@ export const apiKeyRouter = createTRPCRouter({
 			{
 				id: string;
 				description: string | null;
+				deactivated: boolean;
 				inputTokens: number;
 				cachedInputTokens: number;
 				outputTokens: number;
@@ -192,6 +199,7 @@ export const apiKeyRouter = createTRPCRouter({
 			const entry = byKey.get(id) ?? {
 				id,
 				description: row.description,
+				deactivated: row.deactivated,
 				inputTokens: 0,
 				cachedInputTokens: 0,
 				outputTokens: 0,
@@ -266,6 +274,7 @@ export const apiKeyRouter = createTRPCRouter({
 		return Array.from(byKey.values()).map((row) => ({
 			id: row.id,
 			description: row.description,
+			deactivated: row.deactivated,
 			inputTokens: row.inputTokens,
 			cachedInputTokens: row.cachedInputTokens,
 			outputTokens: row.outputTokens,
@@ -275,6 +284,23 @@ export const apiKeyRouter = createTRPCRouter({
 			models: row.models.sort((a, b) => a.model.localeCompare(b.model)),
 		}));
 	}),
+	deactivateApiKey: protectedProcedure
+		.input(
+			z.object({
+				id: z.string().trim().min(1),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const owner = ctx.session.user.id;
+			if (!owner) {
+				throw new TRPCError({ code: "UNAUTHORIZED" });
+			}
+
+			await ctx.db
+				.update(apikeys)
+				.set({ deactivated: true })
+				.where(and(eq(apikeys.uuid, input.id), eq(apikeys.owner, owner)));
+		}),
 	createApiKey: protectedProcedure
 		.input(
 			z.object({

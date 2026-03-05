@@ -35,6 +35,7 @@ export type ApiKeyTableRow = {
 	id?: string;
 	description?: string | null;
 	model?: string | null;
+	deactivated?: boolean;
 	inputTokens: number;
 	cachedInputTokens: number;
 	outputTokens: number;
@@ -75,9 +76,13 @@ function formatCost(value: number | null, currency?: string | null) {
 export function ApiKeysTable({
 	data,
 	action,
+	onRequestDeactivate,
+	deactivatingId,
 }: {
 	data: ApiKeyTableRow[];
 	action?: ReactNode;
+	onRequestDeactivate?: (payload: { id: string; label: string }) => void;
+	deactivatingId?: string | null;
 }) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [globalFilter, setGlobalFilter] = useState("");
@@ -176,8 +181,34 @@ export function ApiKeysTable({
 				cell: ({ row, getValue }) =>
 					row.original.kind === "model" ? "—" : (getValue<string>() ?? "—"),
 			},
+			{
+				id: "status",
+				header: "Status",
+				enableSorting: false,
+				cell: ({ row }) => {
+					if (row.original.kind === "model") return "—";
+					if (row.original.deactivated) {
+						return (
+							<span className="text-muted-foreground text-xs">Deaktiviert</span>
+						);
+					}
+					const id = row.original.id;
+					if (!id || !onRequestDeactivate) return "Aktiv";
+					const label = row.original.description?.trim() || "Ohne Beschreibung";
+					return (
+						<Button
+							disabled={deactivatingId === id}
+							onClick={() => onRequestDeactivate({ id, label })}
+							size="sm"
+							variant="outline"
+						>
+							{deactivatingId === id ? "Deaktivieren..." : "Deaktivieren"}
+						</Button>
+					);
+				},
+			},
 		],
-		[],
+		[deactivatingId, onRequestDeactivate],
 	);
 
 	const table = useReactTable({
