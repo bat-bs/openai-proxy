@@ -9,6 +9,9 @@
     # Default dev shell pulls in Go tooling and treefmt formatting.
     devShells.default = pkgs.mkShell {
       name = "openai-api-proxy-shell";
+      buildInputs = [
+        pkgs.nodejs_24
+      ];
       inputsFrom = [
         config.devShells.openai-api-proxy-shell
         config.treefmt.build.devShell
