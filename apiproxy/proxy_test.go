@@ -1,6 +1,7 @@
 package apiproxy
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -90,5 +91,57 @@ func TestForwarding_V1ChatCompletions(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `"messages"`) {
 		t.Fatalf("unexpected body forwarded: %s", gotBody)
+	}
+}
+
+func TestEnsureStreamUsageForChatCompletions_AddsIncludeUsageWhenMissing(t *testing.T) {
+	body := `{"model":"gpt-5-mini","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest("POST", "http://localhost/api/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	ensureStreamUsageForChatCompletions(req)
+
+	gotBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("failed to read request body: %v", err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(gotBytes, &payload); err != nil {
+		t.Fatalf("failed to decode patched body: %v", err)
+	}
+
+	streamOptions, ok := payload["stream_options"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected stream_options object in patched payload, got: %v", payload["stream_options"])
+	}
+	includeUsage, ok := streamOptions["include_usage"].(bool)
+	if !ok || !includeUsage {
+		t.Fatalf("expected stream_options.include_usage=true, got: %v", streamOptions["include_usage"])
+	}
+}
+
+func TestEnsureStreamUsageForChatCompletions_KeepsExistingIncludeUsage(t *testing.T) {
+	body := `{"model":"gpt-5-mini","stream":true,"stream_options":{"include_usage":false},"messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest("POST", "http://localhost/api/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	ensureStreamUsageForChatCompletions(req)
+
+	gotBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("failed to read request body: %v", err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(gotBytes, &payload); err != nil {
+		t.Fatalf("failed to decode patched body: %v", err)
+	}
+
+	streamOptions, ok := payload["stream_options"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected stream_options object, got: %v", payload["stream_options"])
+	}
+	includeUsage, ok := streamOptions["include_usage"].(bool)
+	if !ok || includeUsage {
+		t.Fatalf("expected existing include_usage=false to remain unchanged, got: %v", streamOptions["include_usage"])
 	}
 }

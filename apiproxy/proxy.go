@@ -2,6 +2,7 @@ package apiproxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -150,6 +151,7 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
 	// Preserve incoming query parameters unchanged.
 	r.URL.RawQuery = r.URL.RawQuery
+	ensureStreamUsageForChatCompletions(r)
 
 	backendProxy[r.Host] = proxy
 
@@ -184,6 +186,62 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 
 	proxy.ServeHTTP(w, r)
 
+}
+
+// ensureStreamUsageForChatCompletions enables usage emission for streaming chat
+// completions by adding stream_options.include_usage=true when it is missing.
+func ensureStreamUsageForChatCompletions(r *http.Request) {
+	if r == nil || r.URL == nil || r.Body == nil {
+		return
+	}
+	path := strings.ToLower(r.URL.Path)
+	if !(strings.HasSuffix(path, "/chat/completions") || strings.Contains(path, "/chat/completions/")) {
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		return
+	}
+	defer func() {
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	}()
+	if len(bytes.TrimSpace(bodyBytes)) == 0 {
+		return
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		return
+	}
+
+	streamEnabled, _ := payload["stream"].(bool)
+	if !streamEnabled {
+		return
+	}
+
+	changed := false
+	streamOptions, hasOptions := payload["stream_options"].(map[string]interface{})
+	if !hasOptions {
+		streamOptions = map[string]interface{}{}
+		payload["stream_options"] = streamOptions
+		changed = true
+	}
+	if _, exists := streamOptions["include_usage"]; !exists {
+		streamOptions["include_usage"] = true
+		changed = true
+	}
+	if !changed {
+		return
+	}
+
+	updatedBody, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	bodyBytes = updatedBody
+	r.ContentLength = int64(len(bodyBytes))
+	r.Header.Set("Content-Length", fmt.Sprintf("%d", len(bodyBytes)))
 }
 
 // singleJoiningSlash joins two URL paths with a single slash between them.

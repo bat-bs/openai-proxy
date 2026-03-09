@@ -192,6 +192,62 @@ func TestNewResponse_SSEOverCapEventApproximatesCompletionTokens(t *testing.T) {
 	}
 }
 
+func TestNewResponse_ChatCompletionStoresInputTokens(t *testing.T) {
+	jsonBody := `{
+		"id":"chatcmpl-DHWFPHKozPO2ImSWSs4Nc7aGEoyMg",
+		"object":"chat.completion",
+		"model":"gpt-5-mini-2025-08-07",
+		"usage":{
+			"completion_tokens":200,
+			"completion_tokens_details":{
+				"accepted_prediction_tokens":0,
+				"audio_tokens":0,
+				"reasoning_tokens":200,
+				"rejected_prediction_tokens":0
+			},
+			"prompt_tokens":23,
+			"prompt_tokens_details":{
+				"audio_tokens":0,
+				"cached_tokens":0
+			},
+			"total_tokens":223
+		}
+	}`
+
+	req, _ := http.NewRequest("POST", "https://example.local/openai/v1/chat/completions", nil)
+	req.Header.Set(authHeader, "Bearer TESTTOKEN")
+
+	resp := &http.Response{
+		Request: req,
+		Header:  http.Header{"Content-Type": []string{"application/json; charset=utf-8"}},
+		Body:    io.NopCloser(strings.NewReader(jsonBody)),
+	}
+
+	fb := &fakeDBForTest{}
+	hash, _ := bcrypt.GenerateFromPassword([]byte("TESTTOKEN"), 5)
+	fb.apiKeys = []db.ApiKey{{UUID: "uid-1", ApiKey: string(hash), Owner: "owner1"}}
+
+	rc := &ResponseConf{db: fb}
+	if err := rc.NewResponse(resp); err != nil {
+		t.Fatalf("NewResponse error: %v", err)
+	}
+
+	if len(fb.writes) != 1 {
+		t.Fatalf("expected 1 DB write, got %d", len(fb.writes))
+	}
+
+	w := fb.writes[0]
+	if w.InputTokenCount != 23 {
+		t.Fatalf("expected input tokens 23, got %d", w.InputTokenCount)
+	}
+	if w.CachedInputTokenCount != 0 {
+		t.Fatalf("expected cached input tokens 0, got %d", w.CachedInputTokenCount)
+	}
+	if w.OutputTokenCount != 200 {
+		t.Fatalf("expected output tokens 200, got %d", w.OutputTokenCount)
+	}
+}
+
 // fake DB implementation for test
 type fakeDBForTest struct {
 	apiKeys []db.ApiKey
