@@ -308,17 +308,15 @@ func dedupPromptTokens(total, cached int) int {
 	return total - cached
 }
 
-var snapshotSuffixPattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}$`)
+var snapshotSuffixPattern = regexp.MustCompile(`^(.*)-(\d{4}-\d{2}-\d{2})$`)
 
 func splitModelSnapshot(model string) (string, string) {
 	if model == "" {
 		return "", ""
 	}
-	if idx := strings.LastIndex(model, "-"); idx > 0 {
-		suffix := model[idx+1:]
-		if snapshotSuffixPattern.MatchString(suffix) {
-			return model[:idx], suffix
-		}
+	matches := snapshotSuffixPattern.FindStringSubmatch(model)
+	if len(matches) == 3 && matches[1] != "" {
+		return matches[1], matches[2]
 	}
 	return model, ""
 }
