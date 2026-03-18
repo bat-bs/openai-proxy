@@ -1,4 +1,4 @@
-h1:2j8AtX2vpcoTEslqnLHx0+BTn7Boa199ELRee20giEg=
+h1:uD0kHBSeCJvUQblwBr8LJ6b9vrICujr7oYOZrGzxwTA=
 20240924151008_init.sql h1:rTjsfTqruGXjIUITaR6Pqt0n4lm+4EcdvESuYXgmyP4=
 20240924154252_request_monitoring.sql h1:VWH6kcc2DWS7L9tBQ8lgS858/9f5HP7PMYZo0fZlCX8=
 20241001124048_id_datatype.sql h1:Nb1OpAzcVshPzgEqQ3w/sCFjorO4h/GTOBeuISanu4k=
@@ -18,3 +18,5 @@ h1:2j8AtX2vpcoTEslqnLHx0+BTn7Boa199ELRee20giEg=
 20260301130000_costs_unit_enum.sql h1:fSMut8VD8W/VHlaPQdjFaLT7kN6UuUfw/yqgdmWY+Pc=
 20260304120000_add_apikeys_deactivated.sql h1:CyRdhz3axkbej6xCqb0SngFkuXN7dI6Fox0WBfpLMCY=
 20260305130000_reporting_groups.sql h1:HS3rs7B/55oLaP6s4WWVuzS4MxhyCJfQPndXN2p3uEw=
+20260318100000_add_gpt_5_4_mini_nano_costs.sql h1:nSIJLpAB+9fo98DX8xo/g1xu+Mw6Dv4h6yYJ7AonhgY=
+20260318101000_add_gpt_5_4_models.sql h1:1aKL2Qjrt7bwO5fDoBjH94gDT5q/doFLneVcu7W0ThQ=
