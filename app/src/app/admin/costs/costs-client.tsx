@@ -13,7 +13,6 @@ import { api } from "~/trpc/react";
 import { CostsTable } from "./costs-table";
 
 const defaultUnit = costUnitOptions[0];
-const defaultBackend = "openai";
 const defaultCurrency = "EUR";
 const defaultTokenType = "input";
 
@@ -31,9 +30,10 @@ export function CostsClient() {
 	const [price, setPrice] = useState("");
 	const [validFrom, setValidFrom] = useState(todayString());
 	const [unitOfMessure, setUnitOfMessure] = useState<CostUnit>(defaultUnit);
-	const [isRegional, setIsRegional] = useState(false);
-	const [backendName, setBackendName] = useState(defaultBackend);
 	const [currency, setCurrency] = useState(defaultCurrency);
+	const [stageType, setStageType] = useState("context_length");
+	const [stageMinTokens, setStageMinTokens] = useState(0);
+	const [stageMaxTokens, setStageMaxTokens] = useState<string>("");
 
 	const createCost = api.admin.createCost.useMutation({
 		onSuccess: async () => {
@@ -42,9 +42,10 @@ export function CostsClient() {
 			setPrice("");
 			setValidFrom(todayString());
 			setUnitOfMessure(defaultUnit);
-			setIsRegional(false);
-			setBackendName(defaultBackend);
 			setCurrency(defaultCurrency);
+			setStageType("context_length");
+			setStageMinTokens(0);
+			setStageMaxTokens("");
 			await utils.admin.listCosts.invalidate();
 			toast.success("Eintrag erstellt.");
 		},
@@ -74,11 +75,15 @@ export function CostsClient() {
 	});
 
 	const priceValue = useMemo(() => Number.parseInt(price, 10), [price]);
+	const stageMaxTokensValue =
+		stageMaxTokens.trim() === "" ? null : Number.parseInt(stageMaxTokens, 10);
+	const stageMaxTokensValid =
+		stageMaxTokensValue === null || !Number.isNaN(stageMaxTokensValue);
 	const canSubmit =
 		model.trim().length > 0 &&
-		backendName.trim().length > 0 &&
 		tokenType.trim().length > 0 &&
-		!Number.isNaN(priceValue);
+		!Number.isNaN(priceValue) &&
+		stageMaxTokensValid;
 
 	return (
 		<div className="mx-auto w-full max-w-6xl px-6 py-10">
@@ -95,8 +100,7 @@ export function CostsClient() {
 						<div>
 							<h2 className="font-semibold text-sm">Neuen Eintrag anlegen</h2>
 							<p className="text-muted-foreground text-xs">
-								Standardwerte: Backend {defaultBackend}, Einheit {defaultUnit},
-								Währung {defaultCurrency}.
+								Standardwerte: Einheit {defaultUnit}, Währung {defaultCurrency}.
 							</p>
 						</div>
 						<div className="grid gap-3 md:grid-cols-3">
@@ -184,20 +188,6 @@ export function CostsClient() {
 							<div className="flex flex-col gap-1">
 								<label
 									className="font-medium text-muted-foreground text-xs"
-									htmlFor="costs-create-backend"
-								>
-									Backend
-								</label>
-								<Input
-									id="costs-create-backend"
-									onChange={(event) => setBackendName(event.target.value)}
-									placeholder="openai"
-									value={backendName}
-								/>
-							</div>
-							<div className="flex flex-col gap-1">
-								<label
-									className="font-medium text-muted-foreground text-xs"
 									htmlFor="costs-create-currency"
 								>
 									Währung
@@ -212,17 +202,56 @@ export function CostsClient() {
 									value={currency}
 								/>
 							</div>
-							<div className="flex items-center gap-2">
-								<input
-									checked={isRegional}
-									className="h-4 w-4 rounded border-border"
-									id="isRegional"
-									onChange={(event) => setIsRegional(event.target.checked)}
-									type="checkbox"
-								/>
-								<label className="text-sm" htmlFor="isRegional">
-									Regionale Preisgestaltung
+						</div>
+
+						<div className="mt-4 grid gap-3 md:grid-cols-3">
+							<div className="flex flex-col gap-1">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-stage-type"
+								>
+									Stage Typ
 								</label>
+								<Input
+									id="costs-create-stage-type"
+									onChange={(event) => setStageType(event.target.value)}
+									value={stageType}
+								/>
+							</div>
+							<div className="flex flex-col gap-1">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-stage-min"
+								>
+									Stage Min Tokens
+								</label>
+								<Input
+									id="costs-create-stage-min"
+									min={0}
+									onChange={(event) =>
+										setStageMinTokens(
+											Number.parseInt(event.target.value || "0", 10),
+										)
+									}
+									type="number"
+									value={String(stageMinTokens)}
+								/>
+							</div>
+							<div className="flex flex-col gap-1">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-stage-max"
+								>
+									Stage Max Tokens
+								</label>
+								<Input
+									id="costs-create-stage-max"
+									min={0}
+									onChange={(event) => setStageMaxTokens(event.target.value)}
+									placeholder="(optional)"
+									type="number"
+									value={stageMaxTokens}
+								/>
 							</div>
 						</div>
 						<div className="flex flex-wrap items-center gap-3">
@@ -235,9 +264,10 @@ export function CostsClient() {
 										validFrom: validFrom || undefined,
 										tokenType: tokenType.trim(),
 										unitOfMessure: unitOfMessure ?? null,
-										isRegional,
-										backendName: backendName.trim(),
 										currency: currency.trim() || null,
+										stageType: stageType.trim() || "context_length",
+										stageMinTokens,
+										stageMaxTokens: stageMaxTokensValue,
 									})
 								}
 							>

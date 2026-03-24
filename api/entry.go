@@ -49,7 +49,6 @@ func (a *ApiHandler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 		UUID:        uuid,
 		ApiKey:      a.hashToken(apikey),
 		Owner:       claims.Sub,
-		AiApi:       r.Form.Get("apitype"),
 		Description: r.Form.Get("beschreibung"),
 	}
 	a.db.WriteEntry(&h)

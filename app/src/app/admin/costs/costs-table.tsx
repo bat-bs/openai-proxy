@@ -38,25 +38,29 @@ import {
 import { type CostUnit, costUnitOptions } from "~/lib/costs";
 
 export type CostRow = {
+	id: number;
 	model: string;
 	price: number;
 	validFrom: string | null;
 	tokenType: string;
 	unitOfMessure: CostUnit | null;
-	isRegional: boolean;
-	backendName: string;
 	currency: string | null;
+	stageType: string | null;
+	stageMinTokens: number;
+	stageMaxTokens: number | null;
 };
 
 type CostPayload = {
+	id?: number;
 	model: string;
 	price: number;
 	validFrom?: string;
 	tokenType: string;
 	unitOfMessure?: CostUnit | null;
-	isRegional: boolean;
-	backendName: string;
 	currency?: string | null;
+	stageType?: string | null;
+	stageMinTokens?: number;
+	stageMaxTokens?: number | null;
 };
 
 type CostUpdatePayload = {
@@ -108,36 +112,43 @@ function CostEditDialog({
 	const [tokenType, setTokenType] = useState(row.tokenType);
 	const [price, setPrice] = useState(String(row.price));
 	const [validFrom, setValidFrom] = useState(row.validFrom ?? todayString());
+	const [stageType, setStageType] = useState(row.stageType ?? "context_length");
+	const [stageMinTokens, setStageMinTokens] = useState(row.stageMinTokens);
+	const [stageMaxTokens, setStageMaxTokens] = useState(
+		row.stageMaxTokens === null ? "" : String(row.stageMaxTokens),
+	);
 	const [unitOfMessure, setUnitOfMessure] = useState<CostUnit>(
 		costUnitOptions.includes((row.unitOfMessure ?? "") as CostUnit)
 			? ((row.unitOfMessure ?? defaultUnit) as CostUnit)
 			: defaultUnit,
 	);
-	const [isRegional, setIsRegional] = useState(row.isRegional);
-	const [backendName, setBackendName] = useState(row.backendName);
 	const [currency, setCurrency] = useState(row.currency ?? "");
-	const fieldKey = `${row.model}-${row.tokenType}-${row.price}`.replace(
-		/[^a-zA-Z0-9-_]/g,
-		"-",
-	);
+	const fieldKey = String(row.id);
 
 	const priceValue = useMemo(() => Number.parseInt(price, 10), [price]);
+	const stageMaxTokensValue =
+		stageMaxTokens.trim() === "" ? null : Number.parseInt(stageMaxTokens, 10);
+	const stageMaxTokensValid =
+		stageMaxTokensValue === null || !Number.isNaN(stageMaxTokensValue);
 	const canSubmit =
 		model.trim().length > 0 &&
-		backendName.trim().length > 0 &&
 		tokenType.trim().length > 0 &&
-		!Number.isNaN(priceValue);
+		!Number.isNaN(priceValue) &&
+		stageMaxTokensValid &&
+		stageMinTokens >= 0;
 
 	const originalPayload = useMemo<CostPayload>(
 		() => ({
+			id: row.id,
 			model: row.model,
 			price: row.price,
 			validFrom: row.validFrom ?? undefined,
 			tokenType: row.tokenType,
 			unitOfMessure: row.unitOfMessure ?? null,
-			isRegional: row.isRegional,
-			backendName: row.backendName,
 			currency: row.currency ?? null,
+			stageType: row.stageType ?? "context_length",
+			stageMinTokens: row.stageMinTokens,
+			stageMaxTokens: row.stageMaxTokens ?? null,
 		}),
 		[row],
 	);
@@ -155,9 +166,12 @@ function CostEditDialog({
 					setTokenType(row.tokenType);
 					setPrice(String(row.price));
 					setValidFrom(row.validFrom ?? todayString());
+					setStageType(row.stageType ?? "context_length");
+					setStageMinTokens(row.stageMinTokens);
+					setStageMaxTokens(
+						row.stageMaxTokens === null ? "" : String(row.stageMaxTokens),
+					);
 					setUnitOfMessure(row.unitOfMessure ?? defaultUnit);
-					setIsRegional(row.isRegional);
-					setBackendName(row.backendName);
 					setCurrency(row.currency ?? "");
 				}
 			}}
@@ -260,6 +274,54 @@ function CostEditDialog({
 						<div className="flex flex-col gap-1">
 							<label
 								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-stage-type-${fieldKey}`}
+							>
+								Stage Typ
+							</label>
+							<Input
+								id={`costs-stage-type-${fieldKey}`}
+								onChange={(event) => setStageType(event.target.value)}
+								value={stageType}
+							/>
+						</div>
+						<div className="flex flex-col gap-1">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-stage-min-${fieldKey}`}
+							>
+								Stage Min Tokens
+							</label>
+							<Input
+								id={`costs-stage-min-${fieldKey}`}
+								min={0}
+								onChange={(event) =>
+									setStageMinTokens(
+										Number.parseInt(event.target.value || "0", 10),
+									)
+								}
+								type="number"
+								value={String(stageMinTokens)}
+							/>
+						</div>
+						<div className="flex flex-col gap-1">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-stage-max-${fieldKey}`}
+							>
+								Stage Max Tokens
+							</label>
+							<Input
+								id={`costs-stage-max-${fieldKey}`}
+								min={0}
+								onChange={(event) => setStageMaxTokens(event.target.value)}
+								placeholder="(optional)"
+								type="number"
+								value={stageMaxTokens}
+							/>
+						</div>
+						<div className="flex flex-col gap-1">
+							<label
+								className="font-medium text-muted-foreground text-xs"
 								htmlFor={`costs-unit-${fieldKey}`}
 							>
 								Einheit
@@ -282,20 +344,6 @@ function CostEditDialog({
 						<div className="flex flex-col gap-1">
 							<label
 								className="font-medium text-muted-foreground text-xs"
-								htmlFor={`costs-backend-${fieldKey}`}
-							>
-								Backend
-							</label>
-							<Input
-								id={`costs-backend-${fieldKey}`}
-								onChange={(event) => setBackendName(event.target.value)}
-								placeholder="openai"
-								value={backendName}
-							/>
-						</div>
-						<div className="flex flex-col gap-1">
-							<label
-								className="font-medium text-muted-foreground text-xs"
 								htmlFor={`costs-currency-${fieldKey}`}
 							>
 								Währung
@@ -310,21 +358,6 @@ function CostEditDialog({
 								value={currency}
 							/>
 						</div>
-						<div className="flex items-center gap-2">
-							<input
-								checked={isRegional}
-								className="h-4 w-4 rounded border-border"
-								id={`costs-regional-${row.model}-${row.tokenType}-${row.price}`}
-								onChange={(event) => setIsRegional(event.target.checked)}
-								type="checkbox"
-							/>
-							<label
-								className="text-sm"
-								htmlFor={`costs-regional-${row.model}-${row.tokenType}-${row.price}`}
-							>
-								Regionale Preisgestaltung
-							</label>
-						</div>
 					</div>
 				</div>
 				<DialogFooter showCloseButton>
@@ -338,9 +371,10 @@ function CostEditDialog({
 									validFrom: effectiveValidFrom,
 									tokenType: tokenType.trim(),
 									unitOfMessure: unitOfMessure ?? null,
-									isRegional,
-									backendName: backendName.trim(),
 									currency: currency.trim() || null,
+									stageType: stageType.trim() || "context_length",
+									stageMinTokens,
+									stageMaxTokens: stageMaxTokensValue,
 								};
 
 								if (mode === "update") {
@@ -381,7 +415,6 @@ export function CostsTable({
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [globalFilter, setGlobalFilter] = useState("");
 	const [modelFilter, setModelFilter] = useState("");
-	const [backendFilter, setBackendFilter] = useState("");
 	const [tokenFilter, setTokenFilter] = useState("");
 	const [currencyFilter, setCurrencyFilter] = useState("");
 	const [pagination, setPagination] = useState({
@@ -395,12 +428,6 @@ export function CostsTable({
 			if (
 				modelFilter &&
 				!row.model.toLowerCase().includes(modelFilter.toLowerCase())
-			) {
-				return false;
-			}
-			if (
-				backendFilter &&
-				!row.backendName.toLowerCase().includes(backendFilter.toLowerCase())
 			) {
 				return false;
 			}
@@ -422,23 +449,17 @@ export function CostsTable({
 				row.tokenType,
 				row.price,
 				row.unitOfMessure ?? "",
-				row.backendName,
 				row.currency ?? "",
-				row.isRegional ? "regional" : "standard",
+				row.stageType ?? "",
+				row.stageMinTokens,
+				row.stageMaxTokens ?? "",
 				formatDate(row.validFrom),
 			];
 			return values
 				.map((value) => String(value).toLowerCase())
 				.some((value) => value.includes(search));
 		});
-	}, [
-		backendFilter,
-		currencyFilter,
-		data,
-		globalFilter,
-		modelFilter,
-		tokenFilter,
-	]);
+	}, [currencyFilter, data, globalFilter, modelFilter, tokenFilter]);
 
 	const columns = useMemo<ColumnDef<CostRow>[]>(
 		() => [
@@ -449,6 +470,24 @@ export function CostsTable({
 			{
 				accessorKey: "tokenType",
 				header: "Token-Typ",
+			},
+			{
+				accessorKey: "stageType",
+				header: "Stage Typ",
+				cell: ({ getValue }) => getValue<string | null>() ?? "—",
+			},
+			{
+				accessorKey: "stageMinTokens",
+				header: "Stage Min",
+				cell: ({ getValue }) => formatNumber(getValue<number>()),
+			},
+			{
+				accessorKey: "stageMaxTokens",
+				header: "Stage Max",
+				cell: ({ getValue }) => {
+					const v = getValue<number | null>();
+					return v === null ? "∞" : formatNumber(v);
+				},
 			},
 			{
 				accessorKey: "price",
@@ -465,15 +504,6 @@ export function CostsTable({
 				accessorKey: "currency",
 				header: "Währung",
 				cell: ({ getValue }) => getValue<string | null>() ?? "—",
-			},
-			{
-				accessorKey: "backendName",
-				header: "Backend",
-			},
-			{
-				accessorKey: "isRegional",
-				header: "Region",
-				cell: ({ getValue }) => (getValue<boolean>() ? "Regional" : "Standard"),
 			},
 			{
 				accessorKey: "validFrom",
@@ -520,14 +550,7 @@ export function CostsTable({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reset pagination when filters change.
 	useEffect(() => {
 		setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-	}, [
-		globalFilter,
-		modelFilter,
-		backendFilter,
-		tokenFilter,
-		currencyFilter,
-		data.length,
-	]);
+	}, [globalFilter, modelFilter, tokenFilter, currencyFilter, data.length]);
 
 	const totalRows = table.getFilteredRowModel().rows.length;
 	const startRow =
@@ -563,11 +586,6 @@ export function CostsTable({
 						value={modelFilter}
 					/>
 					<Input
-						onChange={(event) => setBackendFilter(event.target.value)}
-						placeholder="Backend"
-						value={backendFilter}
-					/>
-					<Input
 						onChange={(event) => setTokenFilter(event.target.value)}
 						placeholder="Token-Typ"
 						value={tokenFilter}
@@ -578,17 +596,12 @@ export function CostsTable({
 						value={currencyFilter}
 					/>
 				</div>
-				{globalFilter ||
-				modelFilter ||
-				backendFilter ||
-				tokenFilter ||
-				currencyFilter ? (
+				{globalFilter || modelFilter || tokenFilter || currencyFilter ? (
 					<div>
 						<Button
 							onClick={() => {
 								setGlobalFilter("");
 								setModelFilter("");
-								setBackendFilter("");
 								setTokenFilter("");
 								setCurrencyFilter("");
 							}}

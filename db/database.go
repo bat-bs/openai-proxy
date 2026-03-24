@@ -19,7 +19,6 @@ type ApiKey struct {
 	UUID                  string // ID that will be displayed in UI
 	ApiKey                string // Backend, not implemented yet
 	Owner                 string // sub from oidc claims or name string on return
-	AiApi                 string // can be openai or azure
 	Description           string // optional, user can describe his key
 	Deactivated           bool
 	TokenCountPrompt      *int
@@ -97,8 +96,8 @@ func (d *Database) LookupDatabasePath() string {
 
 func (d *Database) WriteEntry(a *ApiKey) error {
 	_, err := d.db.Exec(
-		"INSERT INTO apiKeys (UUID, ApiKey, Owner, AiApi, Description, Deactivated) VALUES ($1, $2, $3, $4, $5, $6)",
-		a.UUID, a.ApiKey, a.Owner, a.AiApi, a.Description, a.Deactivated,
+		"INSERT INTO apiKeys (UUID, ApiKey, Owner, Description, Deactivated) VALUES ($1, $2, $3, $4, $5)",
+		a.UUID, a.ApiKey, a.Owner, a.Description, a.Deactivated,
 	)
 	if err != nil {
 		log.Printf("Api-Key Insert Failed: %v", err)
@@ -149,7 +148,7 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 	var apikeys []ApiKey
 	rows, err := d.db.Query(`
 		SELECT
-			a.UUID, a.Owner, a.AiApi, a.Description,
+			a.UUID, a.Owner, a.Description,
 			COALESCE(SUM(r.input_token_count), 0),
 			COALESCE(SUM(r.cached_input_token_count), 0),
 			COALESCE(SUM(r.output_token_count), 0)
@@ -165,7 +164,7 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 		var a ApiKey
 		var inputTotal, cachedTotal, outputTotal int
 		if err := rows.Scan(
-			&a.UUID, &a.Owner, &a.AiApi, &a.Description,
+			&a.UUID, &a.Owner, &a.Description,
 			&inputTotal, &cachedTotal, &outputTotal,
 		); err != nil {
 			return apikeys, err
@@ -190,28 +189,68 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 }
 
 type Costs struct {
+	ID            int64
 	ModelName     string
 	RetailPrice   int
 	TokenType     string
 	UnitOfMeasure string
-	IsRegional    bool
-	BackendName   string // currently only azure
 	Currency      string
 	RequestTime   time.Time
+
+	// Stage pricing (e.g. context length).
+	StageType      string
+	StageMinTokens int
+	StageMaxTokens *int // NULL means open-ended stage
 }
 
 func (d *Database) WriteCosts(carray []*Costs) error {
 	for _, c := range carray {
-		_, err := d.db.Exec(`
+		stageType := c.StageType
+		if strings.TrimSpace(stageType) == "" {
+			stageType = ContextLengthStageType
+		}
+		validFrom := c.RequestTime
+		if validFrom.IsZero() {
+			now := time.Now().UTC()
+			validFrom = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		}
+
+		result, err := d.db.Exec(`
 		INSERT INTO costs
-		  (model,price,token_type,unit_of_messure,is_regional,backend_name,currency)
+		  (
+		    model, price, valid_from, token_type, unit_of_messure,
+		    currency, stage_type, stage_min_tokens, stage_max_tokens
+		  )
 		VALUES
-		  ($1, $2, $3, $4, $5, $6, $7)`, c.ModelName, c.RetailPrice, c.TokenType, c.UnitOfMeasure, c.IsRegional, c.BackendName, c.Currency)
-		if !strings.Contains(fmt.Sprintf("%s", err), "SQLSTATE 23505") {
+		  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (
+		  model,
+		  valid_from,
+		  token_type,
+		  unit_of_messure,
+		  currency,
+		  stage_type,
+		  stage_min_tokens,
+		  (COALESCE(stage_max_tokens, -1))
+		) DO NOTHING`,
+			c.ModelName,
+			c.RetailPrice,
+			validFrom,
+			c.TokenType,
+			c.UnitOfMeasure,
+			c.Currency,
+			stageType,
+			c.StageMinTokens,
+			c.StageMaxTokens,
+		)
+		if err != nil {
 			log.Println(err)
 		}
 		if err == nil {
-			log.Printf("%s-costs: Wrote %s-Costs (%v) for Model %s to db. Unit: %s", c.BackendName, c.TokenType, c.RetailPrice, c.ModelName, c.UnitOfMeasure)
+			rowsAffected, rowsErr := result.RowsAffected()
+			if rowsErr == nil && rowsAffected > 0 {
+				log.Printf("costs: Wrote %s-Costs (%v) for Model %s to db. Unit: %s", c.TokenType, c.RetailPrice, c.ModelName, c.UnitOfMeasure)
+			}
 		}
 	}
 	log.Println("Azure: Collecting Prices Done!")
@@ -282,16 +321,53 @@ type RequestSummary struct {
 }
 
 func (d *Database) LookupCosts(model string) (carray []Costs) {
-	rows, err := d.db.Query("select * from costs where model = $1", model)
+	rows, err := d.db.Query(`
+		SELECT
+			id,
+			model,
+			price,
+			valid_from,
+			token_type,
+			unit_of_messure,
+			currency,
+			stage_type,
+			stage_min_tokens,
+			stage_max_tokens
+		FROM costs
+		WHERE model = $1`, model)
 	if err != nil {
 		return nil
 	}
 
 	var c Costs
 	for rows.Next() {
-		if err := rows.Scan(&c.ModelName, &c.RetailPrice, &c.RequestTime, &c.TokenType, &c.UnitOfMeasure, &c.IsRegional, &c.BackendName, &c.Currency); err != nil {
+		var currency sql.NullString
+		var stageMax sql.NullInt64
+		if err := rows.Scan(
+			&c.ID,
+			&c.ModelName,
+			&c.RetailPrice,
+			&c.RequestTime,
+			&c.TokenType,
+			&c.UnitOfMeasure,
+			&currency,
+			&c.StageType,
+			&c.StageMinTokens,
+			&stageMax,
+		); err != nil {
 			log.Println("DB Error for looking up costs: ", err)
 			return carray
+		}
+		if currency.Valid {
+			c.Currency = currency.String
+		} else {
+			c.Currency = ""
+		}
+		if stageMax.Valid {
+			v := int(stageMax.Int64)
+			c.StageMaxTokens = &v
+		} else {
+			c.StageMaxTokens = nil
 		}
 		carray = append(carray, c)
 	}
@@ -395,6 +471,93 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string,
 		var rq RequestSummary
 		if err := rows.Scan(&rq.ID, &rq.Model, &rq.TokenCountPrompt, &rq.TokenCountComplete, &rq.RequestTime); err != nil {
 			return summary, err
+		}
+		summary = append(summary, rq)
+	}
+	return summary, nil
+}
+
+func (d *Database) LookupApiKeyUserRequests(uid string, kind string, filter string) ([]RequestSummary, error) {
+	// build sql condition based on filter (same rules as LookupApiKeyUserStats)
+	var condition string
+	switch filter {
+	case "24 Hours":
+		condition = "r.request_time >= NOW() - INTERVAL '1 day'"
+	case "30 days", "7 days":
+		condition = "r.request_time >= NOW() - INTERVAL '1 month'"
+	case "This Month":
+		condition = `
+			r.request_time >= date_trunc('month', current_timestamp)
+			AND r.request_time < date_trunc('month', current_timestamp) + interval '1 month'`
+	case "Last Month":
+		condition = `
+			r.request_time >= date_trunc('month', current_timestamp) - interval '1 month'
+			AND r.request_time < date_trunc('month', current_timestamp)`
+	case "This Year":
+		condition = `
+			r.request_time >= date_trunc('year', current_timestamp)
+			AND r.request_time < date_trunc('year', current_timestamp) + interval '1 year'`
+	case "Last Year":
+		condition = `
+			r.request_time >= date_trunc('year', current_timestamp) - interval '1 year'
+			AND r.request_time < date_trunc('year', current_timestamp)`
+	default:
+		log.Println("Filter did not match", filter)
+	}
+
+	// handle "user" view for admin table and "apiKey" view for user table
+	if kind == "user" {
+		kind = "u.id"
+	} else {
+		kind = "a.UUID"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			u.name,
+			r.id,
+			r.model,
+			COALESCE(r.input_token_count, 0),
+			COALESCE(r.cached_input_token_count, 0),
+			COALESCE(r.output_token_count, 0),
+			r.request_time
+		FROM requests r
+		INNER JOIN apikeys a ON a.UUID = r.api_key_id
+		INNER JOIN users u on a.Owner = u.id
+		WHERE
+			%[1]s = $1
+			AND %[2]s
+		ORDER BY r.request_time;`,
+		kind, condition)
+
+	rows, err := d.db.Query(query, uid)
+	if err != nil {
+		return nil, err
+	}
+
+	var summary []RequestSummary
+	for rows.Next() {
+		var rq RequestSummary
+		if err := rows.Scan(
+			&rq.Name,
+			&rq.ID,
+			&rq.Model,
+			&rq.InputTokenCount,
+			&rq.CachedInputTokenCount,
+			&rq.OutputTokenCount,
+			&rq.RequestTime,
+		); err != nil {
+			return summary, err
+		}
+
+		// Keep legacy fields populated for any UI paths that still use prompt/output.
+		rq.TokenCountPrompt = rq.InputTokenCount - rq.CachedInputTokenCount
+		if rq.TokenCountPrompt < 0 {
+			rq.TokenCountPrompt = 0
+		}
+		rq.TokenCountComplete = rq.OutputTokenCount
+		if rq.InputTokenCount > 0 {
+			rq.CacheRatioPercent = (float64(rq.CachedInputTokenCount) / float64(rq.InputTokenCount)) * 100
 		}
 		summary = append(summary, rq)
 	}

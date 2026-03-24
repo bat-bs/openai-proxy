@@ -5,10 +5,21 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import {
+	addResolvedTotalCost,
+	createTotalCostAggregate,
+	mergeCurrency,
+	presentTotalCost,
+	scaledCostToNumber,
+} from "~/server/costAggregation";
+import {
+	buildCostStageIndex,
+	type CostStageRow,
+	resolveRequestCostStage,
+} from "~/server/costStageResolver";
 import { apikeys, costs, requests, users } from "~/server/db/schema";
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-const DEFAULT_AIAPI = "openai";
 
 function base32Encode(bytes: Uint8Array) {
 	let output = "";
@@ -73,6 +84,7 @@ export const apiKeyRouter = createTRPCRouter({
 				requests.model,
 			);
 
+		// Fetch and index all pricing rows once; resolve cost per request afterwards.
 		const costRows = await ctx.db
 			.select({
 				model: costs.model,
@@ -81,95 +93,71 @@ export const apiKeyRouter = createTRPCRouter({
 				tokenType: costs.tokenType,
 				unitOfMessure: costs.unitOfMessure,
 				currency: costs.currency,
+				stageType: costs.stageType,
+				stageMinTokens: costs.stageMinTokens,
+				stageMaxTokens: costs.stageMaxTokens,
 			})
 			.from(costs);
 
-		const normalize = (value: string | null | undefined) =>
-			(value ?? "").trim().toLowerCase();
+		const costStageRows: CostStageRow[] = costRows.map((row) => ({
+			model: row.model ?? "",
+			tokenType: row.tokenType ?? "",
+			price: Number(row.price ?? 0),
+			validFrom: row.validFrom ?? new Date(0),
+			unitOfMessure: (row.unitOfMessure ??
+				null) as CostStageRow["unitOfMessure"],
+			currency: row.currency ? row.currency.trim().toUpperCase() : null,
+			stageType: row.stageType ?? "context_length",
+			stageMinTokens: Number(row.stageMinTokens ?? 0),
+			stageMaxTokens: row.stageMaxTokens ?? null,
+		}));
 
-		const costIndex = new Map<
+		const costStageIndex = buildCostStageIndex(costStageRows);
+
+		const costAggByKeyModel = new Map<
 			string,
-			Map<
-				string,
-				{
-					price: number;
-					validFrom: string | null;
-					unit: "1M" | "1K" | null;
-					currency: string | null;
-				}
-			>
+			ReturnType<typeof createTotalCostAggregate>
 		>();
 
-		for (const row of costRows) {
-			const modelKey = normalize(row.model);
-			const tokenKey = normalize(row.tokenType);
-			if (!modelKey || !tokenKey) continue;
-			const modelMap = costIndex.get(modelKey) ?? new Map();
-			const existing = modelMap.get(tokenKey);
-			const currentValidFrom = row.validFrom
-				? new Date(row.validFrom).getTime()
-				: 0;
-			const existingValidFrom = existing?.validFrom
-				? new Date(existing.validFrom).getTime()
-				: 0;
-			if (!existing || currentValidFrom >= existingValidFrom) {
-				modelMap.set(tokenKey, {
-					price: Number(row.price ?? 0),
-					validFrom: row.validFrom ?? null,
-					unit: (row.unitOfMessure ?? null) as "1M" | "1K" | null,
-					currency: row.currency ? row.currency.trim().toUpperCase() : null,
-				});
-			}
-			costIndex.set(modelKey, modelMap);
+		const requestRowsForCost = await ctx.db
+			.select({
+				apiKeyId: apikeys.uuid,
+				model: requests.model,
+				requestTime: requests.requestTime,
+				inputTokenCount: requests.inputTokenCount,
+				cachedInputTokenCount: requests.cachedInputTokenCount,
+				outputTokenCount: requests.outputTokenCount,
+			})
+			.from(requests)
+			.innerJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
+			.innerJoin(users, eq(apikeys.owner, users.id))
+			.where(eq(users.id, userId));
+
+		for (const row of requestRowsForCost) {
+			const model = row.model ?? null;
+			if (!model) continue;
+			if (!row.requestTime) continue;
+
+			const inputTokenCount = Number(row.inputTokenCount ?? 0);
+			const cachedInputTokenCount = Number(row.cachedInputTokenCount ?? 0);
+			const outputTokenCount = Number(row.outputTokenCount ?? 0);
+
+			if (inputTokenCount + outputTokenCount <= 0) continue;
+
+			const resolved = resolveRequestCostStage(costStageIndex, {
+				model,
+				requestTime: new Date(row.requestTime),
+				inputTokenCount,
+				cachedInputTokenCount,
+				outputTokenCount,
+			});
+
+			const aggKey = `${row.apiKeyId}::${model}`;
+			const agg = costAggByKeyModel.get(aggKey) ?? createTotalCostAggregate();
+			addResolvedTotalCost(agg, resolved);
+
+			costAggByKeyModel.set(aggKey, agg);
 		}
-
-		const tokenAliases = {
-			input: ["input", "prompt", "input_tokens", "prompt_tokens"],
-			cached: [
-				"cached_input",
-				"cached",
-				"cache",
-				"input_cached",
-				"cached_input_tokens",
-			],
-			output: ["output", "completion", "output_tokens", "completion_tokens"],
-		};
-
-		const unitDivisor = (unit: "1M" | "1K" | null) => {
-			if (unit === "1K") return 1_000;
-			return 1_000_000;
-		};
-
-		const priceToCurrency = (price: number) => price / 100;
-
-		const calcTokenCost = (
-			model: string,
-			tokens: number,
-			aliases: string[],
-		) => {
-			if (tokens <= 0) return { cost: 0, missing: false };
-			const modelKey = normalize(model);
-			const modelMap = costIndex.get(modelKey);
-			if (!modelMap) return { cost: 0, missing: true };
-			let entry:
-				| {
-						price: number;
-						validFrom: string | null;
-						unit: "1M" | "1K" | null;
-						currency: string | null;
-				  }
-				| undefined;
-			for (const alias of aliases) {
-				entry = modelMap.get(alias);
-				if (entry) break;
-			}
-			if (!entry) return { cost: 0, missing: true };
-			return {
-				cost: (tokens / unitDivisor(entry.unit)) * priceToCurrency(entry.price),
-				missing: false,
-				currency: entry.currency,
-			};
-		};
 
 		const byKey = new Map<
 			string,
@@ -189,7 +177,8 @@ export const apiKeyRouter = createTRPCRouter({
 					cost: number | null;
 					currency: string | null;
 				}>;
-				cost: number | null;
+				costScaled: bigint;
+				costMissing: boolean;
 				currency: string | null;
 			}
 		>();
@@ -205,7 +194,8 @@ export const apiKeyRouter = createTRPCRouter({
 				outputTokens: 0,
 				createdAt: row.createdAt ?? null,
 				models: [],
-				cost: 0,
+				costScaled: 0n,
+				costMissing: false,
 				currency: null,
 			};
 
@@ -220,51 +210,30 @@ export const apiKeyRouter = createTRPCRouter({
 
 			const model = row.model ?? "Unknown";
 			if (inputTokens + cachedInputTokens + outputTokens > 0) {
-				const inputCost = calcTokenCost(model, inputTokens, tokenAliases.input);
-				const cachedCost = calcTokenCost(
-					model,
-					cachedInputTokens,
-					tokenAliases.cached,
+				const aggKey = `${id}::${model}`;
+				const modelCostPresentation = presentTotalCost(
+					costAggByKeyModel.get(aggKey),
 				);
-				const outputCost = calcTokenCost(
-					model,
-					outputTokens,
-					tokenAliases.output,
-				);
-				const modelMissing =
-					inputCost.missing || cachedCost.missing || outputCost.missing;
-				const currencies = [
-					inputCost.currency,
-					cachedCost.currency,
-					outputCost.currency,
-				].filter((value): value is string => Boolean(value));
-				const modelCurrency =
-					currencies.length > 0 &&
-					currencies.every((value) => value === currencies[0])
-						? (currencies[0] ?? null)
-						: null;
-				const modelCost = modelMissing
-					? null
-					: inputCost.cost + cachedCost.cost + outputCost.cost;
 
 				entry.models.push({
 					model,
 					inputTokens,
 					cachedInputTokens,
 					outputTokens,
-					cost: modelCost,
-					currency: modelCost === null ? null : modelCurrency,
+					cost: modelCostPresentation.cost,
+					currency: modelCostPresentation.currency,
 				});
 
-				if (entry.cost !== null) {
-					entry.cost = modelCost === null ? null : entry.cost + modelCost;
-					if (entry.cost === null) {
-						entry.currency = null;
-					} else if (entry.currency === null) {
-						entry.currency = modelCurrency;
-					} else if (modelCurrency && entry.currency !== modelCurrency) {
-						entry.currency = null;
-					}
+				const modelAgg = costAggByKeyModel.get(aggKey);
+				if (!modelAgg || modelCostPresentation.missing) {
+					entry.costMissing = true;
+					entry.currency = null;
+				} else {
+					entry.costScaled += modelAgg.totalCostScaled;
+					entry.currency = mergeCurrency(
+						entry.currency,
+						modelCostPresentation.currency,
+					);
 				}
 			}
 
@@ -279,8 +248,8 @@ export const apiKeyRouter = createTRPCRouter({
 			cachedInputTokens: row.cachedInputTokens,
 			outputTokens: row.outputTokens,
 			createdAt: row.createdAt ?? null,
-			cost: row.cost,
-			currency: row.currency ?? null,
+			cost: row.costMissing ? null : scaledCostToNumber(row.costScaled),
+			currency: row.costMissing ? null : (row.currency ?? null),
 			models: row.models.sort((a, b) => a.model.localeCompare(b.model)),
 		}));
 	}),
@@ -323,7 +292,6 @@ export const apiKeyRouter = createTRPCRouter({
 				uuid: id,
 				apikey: hashed,
 				owner,
-				aiapi: DEFAULT_AIAPI,
 				description: input.description?.trim() || null,
 			});
 

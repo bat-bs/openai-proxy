@@ -18,14 +18,16 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 const rangeInput = z.enum(["24h", "7d", "30d", "all"]);
 const costInput = z.object({
+	id: z.number().int().positive().optional(),
 	model: z.string().trim().min(1).max(255),
 	price: z.number().int().nonnegative(),
 	validFrom: z.string().trim().min(1).max(32).optional(),
 	tokenType: z.string().trim().min(1).max(255),
 	unitOfMessure: z.enum(costUnitOptions).optional().nullable(),
-	isRegional: z.boolean(),
-	backendName: z.string().trim().min(1).max(255),
 	currency: z.string().trim().length(3).optional().nullable(),
+	stageType: z.string().trim().min(1).max(255).optional().nullable(),
+	stageMinTokens: z.number().int().min(0).optional(),
+	stageMaxTokens: z.number().int().min(0).optional().nullable(),
 });
 
 export const adminRouter = createTRPCRouter({
@@ -143,23 +145,33 @@ export const adminRouter = createTRPCRouter({
 	listCosts: adminProcedure.query(async ({ ctx }) => {
 		const rows = await ctx.db
 			.select({
+				id: costs.id,
 				model: costs.model,
 				price: costs.price,
 				validFrom: costs.validFrom,
 				tokenType: costs.tokenType,
 				unitOfMessure: costs.unitOfMessure,
-				isRegional: costs.isRegional,
-				backendName: costs.backendName,
 				currency: costs.currency,
+				stageType: costs.stageType,
+				stageMinTokens: costs.stageMinTokens,
+				stageMaxTokens: costs.stageMaxTokens,
 			})
 			.from(costs)
-			.orderBy(costs.model, costs.tokenType, costs.validFrom);
+			.orderBy(
+				costs.model,
+				costs.tokenType,
+				costs.validFrom,
+				costs.stageMinTokens,
+			);
 
 		return rows.map((row) => ({
 			...row,
 			price: Number(row.price ?? 0),
 			validFrom: row.validFrom ?? null,
 			currency: row.currency ? row.currency.trim() : null,
+			stageType: row.stageType ? row.stageType.trim() : null,
+			stageMinTokens: Number(row.stageMinTokens ?? 0),
+			stageMaxTokens: row.stageMaxTokens ?? null,
 		}));
 	}),
 	createCost: adminProcedure
@@ -167,6 +179,9 @@ export const adminRouter = createTRPCRouter({
 		.mutation(async ({ ctx, input }) => {
 			const validFrom =
 				input.validFrom?.trim() || new Date().toISOString().slice(0, 10);
+			const stageType = input.stageType?.trim() || "context_length";
+			const stageMinTokens = input.stageMinTokens ?? 0;
+			const stageMaxTokens = input.stageMaxTokens ?? null;
 
 			await ctx.db.insert(costs).values({
 				model: input.model,
@@ -174,9 +189,10 @@ export const adminRouter = createTRPCRouter({
 				validFrom,
 				tokenType: input.tokenType,
 				unitOfMessure: input.unitOfMessure ?? null,
-				isRegional: input.isRegional,
-				backendName: input.backendName,
 				currency: input.currency ?? null,
+				stageType,
+				stageMinTokens,
+				stageMaxTokens,
 			});
 		}),
 	updatePricing: adminProcedure
@@ -188,6 +204,9 @@ export const adminRouter = createTRPCRouter({
 		.mutation(async ({ ctx, input }) => {
 			const validFrom = new Date().toISOString().slice(0, 10);
 			const update = input.update;
+			const stageType = update.stageType?.trim() || "context_length";
+			const stageMinTokens = update.stageMinTokens ?? 0;
+			const stageMaxTokens = update.stageMaxTokens ?? null;
 
 			await ctx.db.insert(costs).values({
 				model: update.model,
@@ -195,9 +214,10 @@ export const adminRouter = createTRPCRouter({
 				validFrom,
 				tokenType: update.tokenType,
 				unitOfMessure: update.unitOfMessure ?? null,
-				isRegional: update.isRegional,
-				backendName: update.backendName,
 				currency: update.currency ?? null,
+				stageType,
+				stageMinTokens,
+				stageMaxTokens,
 			});
 		}),
 	updateCost: adminProcedure
@@ -216,6 +236,15 @@ export const adminRouter = createTRPCRouter({
 				throw new TRPCError({ code: "BAD_REQUEST" });
 			}
 
+			const stageType =
+				update.stageType?.trim() ||
+				original.stageType?.trim() ||
+				"context_length";
+			const stageMinTokens =
+				update.stageMinTokens ?? original.stageMinTokens ?? 0;
+			const stageMaxTokens =
+				update.stageMaxTokens ?? original.stageMaxTokens ?? null;
+
 			await ctx.db
 				.update(costs)
 				.set({
@@ -224,19 +253,34 @@ export const adminRouter = createTRPCRouter({
 					validFrom,
 					tokenType: update.tokenType,
 					unitOfMessure: update.unitOfMessure ?? null,
-					isRegional: update.isRegional,
-					backendName: update.backendName,
 					currency: update.currency ?? null,
+					stageType,
+					stageMinTokens,
+					stageMaxTokens,
 				})
 				.where(
-					and(
-						eq(costs.model, original.model),
-						eq(costs.price, original.price),
-						eq(costs.validFrom, original.validFrom),
-						eq(costs.tokenType, original.tokenType),
-						eq(costs.isRegional, original.isRegional),
-						eq(costs.backendName, original.backendName),
-					),
+					// Drizzle typed columns don't narrow correctly through complex inline expressions,
+					// so keep this as a local variable to get proper TypeScript null handling.
+					(() => {
+						const originalStageMaxTokens = original.stageMaxTokens ?? null;
+
+						return original.id
+							? eq(costs.id, original.id)
+							: and(
+									eq(costs.model, original.model),
+									eq(costs.price, original.price),
+									eq(costs.validFrom, original.validFrom),
+									eq(costs.tokenType, original.tokenType),
+									eq(
+										costs.stageType,
+										original.stageType?.trim() || "context_length",
+									),
+									eq(costs.stageMinTokens, original.stageMinTokens ?? 0),
+									originalStageMaxTokens === null
+										? sql`${costs.stageMaxTokens} IS NULL`
+										: eq(costs.stageMaxTokens, originalStageMaxTokens),
+								);
+					})(),
 				);
 		}),
 });

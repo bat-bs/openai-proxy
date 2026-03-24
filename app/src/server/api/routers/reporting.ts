@@ -4,6 +4,21 @@ import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import {
+	addResolvedBreakdownCost,
+	addResolvedTotalCost,
+	createBreakdownCostAggregate,
+	createTotalCostAggregate,
+	mergeCurrency,
+	presentBreakdownCost,
+	scaledCostToNumber,
+} from "~/server/costAggregation";
+import {
+	buildCostStageIndex,
+	type CostStageRow,
+	resolveRequestCostStage,
+	tokenTypeLabelWithStage,
+} from "~/server/costStageResolver";
+import {
 	apikeys,
 	costs,
 	reportingGroupMembers,
@@ -52,25 +67,6 @@ const reportRangeInput = z.discriminatedUnion("type", [
 
 const normalize = (value: string | null | undefined) =>
 	(value ?? "").trim().toLowerCase();
-
-const tokenAliases = {
-	input: ["input", "prompt", "input_tokens", "prompt_tokens"],
-	cached: [
-		"cached_input",
-		"cached",
-		"cache",
-		"input_cached",
-		"cached_input_tokens",
-	],
-	output: ["output", "completion", "output_tokens", "completion_tokens"],
-};
-
-const unitDivisor = (unit: "1M" | "1K" | null) => {
-	if (unit === "1K") return 1_000;
-	return 1_000_000;
-};
-
-const priceToCurrency = (price: number) => price / 100;
 
 function getDateRange(input: z.infer<typeof reportRangeInput>) {
 	switch (input.type) {
@@ -461,6 +457,18 @@ export const reportingRouter = createTRPCRouter({
 				: usersBase
 			).groupBy(users.id, users.name, requests.model);
 
+			const scopedConditions = [timeFilter];
+			if (scopedUserIds) {
+				scopedConditions.push(inArray(apikeys.owner, scopedUserIds));
+			}
+			const scopedFilter = and(...scopedConditions);
+
+			const costBucket =
+				input.range.type === "daily"
+					? sql<string>`date_trunc('hour', ${requests.requestTime})`
+					: sql<string>`date_trunc('day', ${requests.requestTime})`;
+
+			// Fetch and index all pricing rows once; resolve cost per request afterwards.
 			const costRows = await ctx.db
 				.select({
 					model: costs.model,
@@ -469,46 +477,26 @@ export const reportingRouter = createTRPCRouter({
 					tokenType: costs.tokenType,
 					unitOfMessure: costs.unitOfMessure,
 					currency: costs.currency,
+					stageType: costs.stageType,
+					stageMinTokens: costs.stageMinTokens,
+					stageMaxTokens: costs.stageMaxTokens,
 				})
 				.from(costs);
 
-			const costIndex = new Map<
-				string,
-				Map<
-					string,
-					{
-						price: number;
-						validFrom: string | null;
-						unit: "1M" | "1K" | null;
-						currency: string | null;
-						tokenType: string | null;
-					}
-				>
-			>();
+			const costStageRows: CostStageRow[] = costRows.map((row) => ({
+				model: row.model ?? "",
+				tokenType: row.tokenType ?? "",
+				price: Number(row.price ?? 0),
+				validFrom: row.validFrom ?? new Date(0),
+				unitOfMessure: (row.unitOfMessure ??
+					null) as CostStageRow["unitOfMessure"],
+				currency: row.currency ? row.currency.trim().toUpperCase() : null,
+				stageType: row.stageType ?? "context_length",
+				stageMinTokens: Number(row.stageMinTokens ?? 0),
+				stageMaxTokens: row.stageMaxTokens ?? null,
+			}));
 
-			for (const row of costRows) {
-				const modelKey = normalize(row.model);
-				const tokenKey = normalize(row.tokenType);
-				if (!modelKey || !tokenKey) continue;
-				const modelMap = costIndex.get(modelKey) ?? new Map();
-				const existing = modelMap.get(tokenKey);
-				const currentValidFrom = row.validFrom
-					? new Date(row.validFrom).getTime()
-					: 0;
-				const existingValidFrom = existing?.validFrom
-					? new Date(existing.validFrom).getTime()
-					: 0;
-				if (!existing || currentValidFrom >= existingValidFrom) {
-					modelMap.set(tokenKey, {
-						price: Number(row.price ?? 0),
-						validFrom: row.validFrom ?? null,
-						unit: (row.unitOfMessure ?? null) as "1M" | "1K" | null,
-						currency: row.currency ? row.currency.trim().toUpperCase() : null,
-						tokenType: row.tokenType ?? null,
-					});
-				}
-				costIndex.set(modelKey, modelMap);
-			}
+			const costStageIndex = buildCostStageIndex(costStageRows);
 
 			const usedCosts = new Map<
 				string,
@@ -523,178 +511,122 @@ export const reportingRouter = createTRPCRouter({
 			>();
 
 			const registerUsedCost = (
-				model: string,
-				tokenKey: string,
-				entry: {
-					price: number;
-					validFrom: string | null;
-					unit: "1M" | "1K" | null;
-					currency: string | null;
-					tokenType: string | null;
-				},
+				tokenType: "input" | "cached" | "output",
+				usedCost: CostStageRow,
 			) => {
-				const key = `${normalize(model)}::${tokenKey}`;
+				const stageMin = usedCost.stageMinTokens;
+				const stageMax = usedCost.stageMaxTokens;
+				const tokenTypeLabel = tokenTypeLabelWithStage(
+					tokenType,
+					stageMin,
+					stageMax,
+				);
+				const validFrom = usedCost.validFrom
+					? new Date(usedCost.validFrom).toISOString().slice(0, 10)
+					: null;
+				const key = `${normalize(usedCost.model)}::${tokenTypeLabel}::${validFrom}`;
 				if (usedCosts.has(key)) return;
+
 				usedCosts.set(key, {
-					model,
-					tokenType: entry.tokenType ?? tokenKey,
-					price: entry.price,
-					unit: entry.unit,
-					currency: entry.currency,
-					validFrom: entry.validFrom,
+					model: usedCost.model,
+					tokenType: tokenTypeLabel,
+					price: usedCost.price,
+					unit: usedCost.unitOfMessure as "1M" | "1K" | null,
+					currency: usedCost.currency
+						? usedCost.currency.trim().toUpperCase()
+						: null,
+					validFrom,
 				});
 			};
 
-			const calcTokenCost = (
-				model: string,
-				tokens: number,
-				aliases: string[],
-			) => {
-				if (tokens <= 0) return { cost: 0, missing: false, currency: null };
-				const modelKey = normalize(model);
-				const modelMap = costIndex.get(modelKey);
-				if (!modelMap) return { cost: 0, missing: true, currency: null };
-				let entry:
-					| {
-							price: number;
-							validFrom: string | null;
-							unit: "1M" | "1K" | null;
-							currency: string | null;
-							tokenType: string | null;
-					  }
-					| undefined;
-				let matchedKey: string | null = null;
-				for (const alias of aliases) {
-					entry = modelMap.get(alias);
-					if (entry) {
-						matchedKey = alias;
-						break;
-					}
-				}
-				if (!entry) return { cost: 0, missing: true, currency: null };
-				if (matchedKey) {
-					registerUsedCost(model, matchedKey, entry);
-				}
-				return {
-					cost:
-						(tokens / unitDivisor(entry.unit)) * priceToCurrency(entry.price),
-					missing: false,
-					currency: entry.currency,
-				};
-			};
-
-			const scopedConditions = [timeFilter];
-			if (scopedUserIds) {
-				scopedConditions.push(inArray(apikeys.owner, scopedUserIds));
-			}
-			const scopedFilter = and(...scopedConditions);
-
-			const costBucket =
-				input.range.type === "daily"
-					? sql<string>`date_trunc('hour', ${requests.requestTime})`
-					: sql<string>`date_trunc('day', ${requests.requestTime})`;
-
-			const costRowsByBucket = await ctx.db
-				.select({
-					bucket: costBucket.as("bucket"),
-					model: requests.model,
-					inputTokens:
-						sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
-							"inputTokens",
-						),
-					cachedInputTokens:
-						sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
-							"cachedInputTokens",
-						),
-					outputTokens:
-						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
-							"outputTokens",
-						),
-				})
-				.from(requests)
-				.leftJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
-				.where(scopedFilter)
-				.groupBy(costBucket, requests.model);
-
 			const costBuckets = new Map<
 				string,
-				{
-					date: Date;
-					cost: number;
-					currency: string | null;
-					missing: boolean;
-				}
+				ReturnType<typeof createTotalCostAggregate> & { date: Date }
 			>();
 
-			for (const row of costRowsByBucket) {
-				const model = row.model ?? null;
-				const inputTokens = Number(row.inputTokens ?? 0);
-				const cachedTokens = Number(row.cachedInputTokens ?? 0);
-				const outputTokens = Number(row.outputTokens ?? 0);
+			const costAggByUserModel = new Map<
+				string,
+				ReturnType<typeof createBreakdownCostAggregate>
+			>();
 
-				if (!model || inputTokens + cachedTokens + outputTokens <= 0) {
-					continue;
-				}
+			const requestRowsForCost = await ctx.db
+				.select({
+					userId: users.id,
+					model: requests.model,
+					requestTime: requests.requestTime,
+					inputTokenCount: requests.inputTokenCount,
+					cachedInputTokenCount: requests.cachedInputTokenCount,
+					outputTokenCount: requests.outputTokenCount,
+					bucket: costBucket.as("bucket"),
+				})
+				.from(requests)
+				.innerJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
+				.innerJoin(users, eq(apikeys.owner, users.id))
+				.where(scopedFilter)
+				.orderBy(requests.requestTime);
+
+			for (const row of requestRowsForCost) {
+				const model = row.model ?? null;
+				if (!model) continue;
+				if (!row.requestTime) continue;
+
+				const inputTokenCount = Number(row.inputTokenCount ?? 0);
+				const cachedInputTokenCount = Number(row.cachedInputTokenCount ?? 0);
+				const outputTokenCount = Number(row.outputTokenCount ?? 0);
+
+				// Keep output stable: ignore requests that contain no billed tokens.
+				if (inputTokenCount + outputTokenCount <= 0) continue;
 
 				const bucketValue = row.bucket;
 				if (!bucketValue) continue;
 				const bucketDate = new Date(bucketValue);
 				const bucketKey = bucketDate.toISOString();
 
-				const inputCost = calcTokenCost(model, inputTokens, tokenAliases.input);
-				const cachedCost = calcTokenCost(
+				const resolved = resolveRequestCostStage(costStageIndex, {
 					model,
-					cachedTokens,
-					tokenAliases.cached,
-				);
-				const outputCost = calcTokenCost(
-					model,
-					outputTokens,
-					tokenAliases.output,
-				);
-
-				const modelMissing =
-					inputCost.missing || cachedCost.missing || outputCost.missing;
-				const currencies = [
-					inputCost.currency,
-					cachedCost.currency,
-					outputCost.currency,
-				].filter((value): value is string => Boolean(value));
-				const modelCurrency =
-					currencies.length > 0 &&
-					currencies.every((value) => value === currencies[0])
-						? (currencies[0] ?? null)
-						: null;
-				const modelCost = modelMissing
-					? null
-					: inputCost.cost + cachedCost.cost + outputCost.cost;
+					requestTime: new Date(row.requestTime),
+					inputTokenCount,
+					cachedInputTokenCount,
+					outputTokenCount,
+				});
 
 				const bucket = costBuckets.get(bucketKey) ?? {
 					date: bucketDate,
-					cost: 0,
-					currency: null,
-					missing: false,
+					...createTotalCostAggregate(),
 				};
 
-				if (modelCost === null) {
-					bucket.missing = true;
-				} else {
-					bucket.cost += modelCost;
-					if (bucket.currency === null) {
-						bucket.currency = modelCurrency;
-					} else if (modelCurrency && bucket.currency !== modelCurrency) {
-						bucket.currency = null;
+				addResolvedTotalCost(bucket, resolved);
+				if (!resolved.missing) {
+					if (resolved.inputCost.usedCost) {
+						registerUsedCost("input", resolved.inputCost.usedCost);
+					}
+					if (resolved.cachedCost.usedCost) {
+						registerUsedCost("cached", resolved.cachedCost.usedCost);
+					}
+					if (resolved.outputCost.usedCost) {
+						registerUsedCost("output", resolved.outputCost.usedCost);
 					}
 				}
 
 				costBuckets.set(bucketKey, bucket);
+
+				const userId = row.userId;
+				const userModelKey = `${userId}::${model}`;
+				const agg =
+					costAggByUserModel.get(userModelKey) ??
+					createBreakdownCostAggregate();
+				addResolvedBreakdownCost(agg, resolved);
+
+				costAggByUserModel.set(userModelKey, agg);
 			}
 
 			const cumulativeCosts = Array.from(costBuckets.values())
 				.sort((a, b) => a.date.getTime() - b.date.getTime())
 				.map((bucket) => ({
 					date: bucket.date.toISOString(),
-					cost: bucket.missing ? null : bucket.cost,
+					cost: bucket.missing
+						? null
+						: scaledCostToNumber(bucket.totalCostScaled),
 				}));
 
 			let runningCost = 0;
@@ -779,7 +711,8 @@ export const reportingRouter = createTRPCRouter({
 					inputTokens: number;
 					cachedInputTokens: number;
 					outputTokens: number;
-					totalCost: number | null;
+					totalCostScaled: bigint;
+					totalCostMissing: boolean;
 					currency: string | null;
 					models: Array<{
 						model: string;
@@ -799,7 +732,8 @@ export const reportingRouter = createTRPCRouter({
 			let totalInputTokens = 0;
 			let totalCachedTokens = 0;
 			let totalOutputTokens = 0;
-			let totalCost = 0;
+			let totalCostScaled = 0n;
+			let totalCostMissing = false;
 			let totalCurrency: string | null = null;
 
 			for (const row of usageRows) {
@@ -810,7 +744,8 @@ export const reportingRouter = createTRPCRouter({
 					inputTokens: 0,
 					cachedInputTokens: 0,
 					outputTokens: 0,
-					totalCost: 0,
+					totalCostScaled: 0n,
+					totalCostMissing: false,
 					currency: null,
 					models: [],
 				};
@@ -829,72 +764,50 @@ export const reportingRouter = createTRPCRouter({
 
 				const model = row.model ?? null;
 				if (model && inputTokens + cachedTokens + outputTokens > 0) {
-					const inputCost = calcTokenCost(
-						model,
-						inputTokens,
-						tokenAliases.input,
-					);
-					const cachedCost = calcTokenCost(
-						model,
-						cachedTokens,
-						tokenAliases.cached,
-					);
-					const outputCost = calcTokenCost(
-						model,
-						outputTokens,
-						tokenAliases.output,
-					);
-
-					const modelMissing =
-						inputCost.missing || cachedCost.missing || outputCost.missing;
-					const currencies = [
-						inputCost.currency,
-						cachedCost.currency,
-						outputCost.currency,
-					].filter((value): value is string => Boolean(value));
-					const modelCurrency =
-						currencies.length > 0 &&
-						currencies.every((value) => value === currencies[0])
-							? (currencies[0] ?? null)
-							: null;
-					const modelCost = modelMissing
-						? null
-						: inputCost.cost + cachedCost.cost + outputCost.cost;
-
-					entry.models.push({
-						model,
-						inputTokens,
-						cachedInputTokens: cachedTokens,
-						outputTokens,
-						inputCost: modelMissing ? null : inputCost.cost,
-						cachedCost: modelMissing ? null : cachedCost.cost,
-						outputCost: modelMissing ? null : outputCost.cost,
-						totalCost: modelCost,
-						currency: modelCost === null ? null : modelCurrency,
-					});
-
-					if (modelCost !== null) {
-						entry.totalCost = (entry.totalCost ?? 0) + modelCost;
-						if (entry.currency === null) {
-							entry.currency = modelCurrency;
-						} else if (modelCurrency && entry.currency !== modelCurrency) {
-							entry.currency = null;
-						}
-					} else {
-						entry.currency = null;
-					}
+					const userModelKey = `${id}::${model}`;
+					const agg = costAggByUserModel.get(userModelKey);
+					const modelCostPresentation = presentBreakdownCost(agg);
 
 					modelTotals.set(model, (modelTotals.get(model) ?? 0) + outputTokens);
 
-					if (modelCost !== null) {
-						totalCost += modelCost;
-						if (totalCurrency === null) {
-							totalCurrency = modelCurrency;
-						} else if (modelCurrency && totalCurrency !== modelCurrency) {
-							totalCurrency = null;
-						}
-					} else {
+					if (!agg || modelCostPresentation.missing) {
+						entry.models.push({
+							model,
+							inputTokens,
+							cachedInputTokens: cachedTokens,
+							outputTokens,
+							inputCost: null,
+							cachedCost: null,
+							outputCost: null,
+							totalCost: null,
+							currency: null,
+						});
+						entry.totalCostMissing = true;
+						entry.currency = null;
+						totalCostMissing = true;
 						totalCurrency = null;
+					} else {
+						const modelCostScaled =
+							agg.inputCostScaled + agg.cachedCostScaled + agg.outputCostScaled;
+						const modelCurrency = modelCostPresentation.currency;
+
+						entry.models.push({
+							model,
+							inputTokens,
+							cachedInputTokens: cachedTokens,
+							outputTokens,
+							inputCost: modelCostPresentation.inputCost,
+							cachedCost: modelCostPresentation.cachedCost,
+							outputCost: modelCostPresentation.outputCost,
+							totalCost: modelCostPresentation.totalCost,
+							currency: modelCurrency,
+						});
+
+						entry.totalCostScaled += modelCostScaled;
+						entry.currency = mergeCurrency(entry.currency, modelCurrency);
+
+						totalCostScaled += modelCostScaled;
+						totalCurrency = mergeCurrency(totalCurrency, modelCurrency);
 					}
 				}
 
@@ -902,7 +815,15 @@ export const reportingRouter = createTRPCRouter({
 			}
 
 			const usersData = Array.from(usersMap.values()).map((user) => ({
-				...user,
+				id: user.id,
+				name: user.name,
+				inputTokens: user.inputTokens,
+				cachedInputTokens: user.cachedInputTokens,
+				outputTokens: user.outputTokens,
+				totalCost: user.totalCostMissing
+					? null
+					: scaledCostToNumber(user.totalCostScaled),
+				currency: user.totalCostMissing ? null : user.currency,
 				models: user.models.sort((a, b) => a.model.localeCompare(b.model)),
 			}));
 
@@ -917,8 +838,10 @@ export const reportingRouter = createTRPCRouter({
 					inputTokens: totalInputTokens,
 					cachedInputTokens: totalCachedTokens,
 					outputTokens: totalOutputTokens,
-					totalCost: totalCost ?? null,
-					currency: totalCurrency ?? null,
+					totalCost: totalCostMissing
+						? null
+						: scaledCostToNumber(totalCostScaled),
+					currency: totalCostMissing ? null : totalCurrency,
 				},
 				modelUsage: Array.from(modelTotals.entries())
 					.map(([model, outputTokens]) => ({

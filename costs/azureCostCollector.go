@@ -24,7 +24,6 @@ type Costs struct {
 	UnitOfMeasure string  `json:"unitOfMeasure"`
 	TokenType     string
 	Currency      string
-	IsRegional    bool
 }
 
 const MoneyUnit = 10000000
@@ -65,7 +64,6 @@ func GetAllCosts(d *db.Database, g <-chan time.Time) {
 					c := GetCosts(skuName, tokenType)
 					if c.SKUName != "" {
 						c.TokenType = tokenType
-						c.IsRegional = regional
 						c.ModelName = model
 						totalCosts = append(totalCosts, c)
 					}
@@ -79,8 +77,6 @@ func GetAllCosts(d *db.Database, g <-chan time.Time) {
 				RetailPrice:   int(costs.RetailPrice * float32(MoneyUnit)),
 				TokenType:     costs.TokenType,
 				UnitOfMeasure: costs.UnitOfMeasure,
-				IsRegional:    costs.IsRegional,
-				BackendName:   "azure",
 			}
 			dbcosts = append(dbcosts, dbc)
 		}

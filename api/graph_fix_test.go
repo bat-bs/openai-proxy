@@ -4,12 +4,11 @@ import (
 	"testing"
 	"time"
 
+	co "openai-api-proxy/costs"
 	db "openai-api-proxy/db"
 )
 
-// This test asserts the correct behavior: input (Inp) costs should be
-// calculated from TokenCountPrompt, not TokenCountComplete. With the
-// current buggy implementation, this test will fail and reproduce the bug.
+// Regression test: input ("input"/"Inp") costs must be computed from prompt tokens, not completion tokens.
 func TestComputeCosts_ShouldUsePromptForInp(t *testing.T) {
 	now := time.Now().UTC()
 	rq := db.RequestSummary{
@@ -21,23 +20,21 @@ func TestComputeCosts_ShouldUsePromptForInp(t *testing.T) {
 
 	inp := db.Costs{
 		ModelName:     "test-model",
-		RetailPrice:   1000,
+		RetailPrice:   1000, // cents per 1K tokens => 10 EUR / 1K
 		TokenType:     "Inp",
 		UnitOfMeasure: "1K",
-		IsRegional:    true,
-		BackendName:   "azure",
 		Currency:      "EUR",
 		RequestTime:   now,
+		StageType:     db.ContextLengthStageType,
 	}
 	out := db.Costs{
 		ModelName:     "test-model",
 		RetailPrice:   2000,
 		TokenType:     "Outp",
 		UnitOfMeasure: "1K",
-		IsRegional:    true,
-		BackendName:   "azure",
 		Currency:      "EUR",
 		RequestTime:   now,
+		StageType:     db.ContextLengthStageType,
 	}
 
 	costs := []db.Costs{inp, out}
@@ -47,8 +44,11 @@ func TestComputeCosts_ShouldUsePromptForInp(t *testing.T) {
 		t.Fatalf("expected estimated to be false when same-day costs are present")
 	}
 
-	// Correct calculation should use prompt for Inp and complete for Outp
-	expectedCorrect := rq.TokenCountPrompt*inp.RetailPrice/1000 + rq.TokenCountComplete*out.RetailPrice/1000
+	// Expected:
+	// input: 1000 prompt tokens / 1K = 1 * (1000 cents / 100) = 10 EUR
+	// output: 2000 completion tokens / 1K = 2 * (2000 cents / 100) = 40 EUR
+	// total: 50 EUR
+	expectedCorrect := 50 * co.MoneyUnit
 
 	if total != expectedCorrect {
 		t.Fatalf("computeCosts returned %d, want %d (correct)", total, expectedCorrect)
