@@ -9,6 +9,7 @@ import (
 	"net/url"
 	co "openai-api-proxy/costs"
 	db "openai-api-proxy/db"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 type GraphHandler struct {
 	a     *ApiHandler
 	cache []Cache
+	// Per-model cost rows cache to avoid repeated DB lookups while resolving per-request costs.
+	costsCache map[string][]db.Costs
 }
 
 // if basecount, filter and DB Rows missmatch, Cache will be updated
@@ -32,7 +35,7 @@ type Cache struct {
 
 func NewGraphHandler(a *ApiHandler) *GraphHandler {
 	var cache []Cache
-	return &GraphHandler{a, cache}
+	return &GraphHandler{a, cache, make(map[string][]db.Costs)}
 }
 
 // Generate Token Graphs for API Key and Admin overview and allow to filter by timeframes
@@ -188,10 +191,10 @@ func (g *GraphHandler) RenderGraph(gr *Graph) {
 		Estimated:  td.isEstimated,
 		Unit:       getUnits()[gr.unit],
 	}
-        if err := t.Execute(gr.w, snippetData); err != nil {
-                log.Println("Error Templating Chart", err)
-                return
-        }
+	if err := t.Execute(gr.w, snippetData); err != nil {
+		log.Println("Error Templating Chart", err)
+		return
+	}
 }
 
 // This handles the request and the formatting of the data
@@ -252,56 +255,77 @@ func (g *GraphHandler) GetTableGraphData(gr *Graph) []db.RequestSummary {
 
 // lookup Data in DB
 func (g *GraphHandler) LookupTableGraphData(gr *Graph) []db.RequestSummary {
-	data, err := g.a.db.LookupApiKeyUserStats(gr.key, gr.kind, gr.filter, gr.overwriteDateTrunc)
-	if err != nil && data != nil {
+	// Tokens graphs are allowed to use aggregated token totals.
+	if !gr.overwriteDateTrunc {
+		data, err := g.a.db.LookupApiKeyUserStats(gr.key, gr.kind, gr.filter, gr.overwriteDateTrunc)
+		if err != nil && data != nil {
+			log.Println(err)
+			http.Error(gr.w, "Could not get Data from DB for User "+string(gr.key), 500)
+			return nil
+		}
+		return data
+	}
+
+	// Cost graphs must be resolved per request so stage selection can use request.input_token_count.
+	requestRows, err := g.a.db.LookupApiKeyUserRequests(gr.key, gr.kind, gr.filter)
+	if err != nil {
 		log.Println(err)
 		http.Error(gr.w, "Could not get Data from DB for User "+string(gr.key), 500)
 		return nil
 	}
 
-	// group by original dateTrunc after calculating costs
-	if gr.overwriteDateTrunc {
-		tm := db.GetFilterTruncMap()
-
-		dates := make(map[time.Time]db.RequestSummary)
-		var timeRange time.Time
-		for i, entry := range data {
-			entry.Cost, entry.IsEstimated = g.GetCost(entry)
-			log.Printf("Entry %v", i)
-			y, m, d := entry.RequestTime.Date()
-			switch tm[gr.filter] {
-			case "hour":
-				timeRange = time.Date(y, m, d, entry.RequestTime.Hour(), 0, 0, 0, time.UTC)
-				log.Println("matched hour")
-			case "day":
-				timeRange = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
-				log.Println("matched day")
-			case "month":
-				timeRange = time.Date(y, m, 0, 0, 0, 0, 0, time.UTC)
-				log.Println("matched month")
-			}
-			if dates[timeRange].ID == "" {
-				dates[timeRange] = entry
-				continue
-			}
-
-			if trunced, ok := dates[timeRange]; ok {
-				log.Printf("Merge Costs with %v + %v", trunced.Cost, entry.Cost)
-				bigT := trunced.Cost * co.MoneyUnit
-				bigE := entry.Cost * co.MoneyUnit
-				bigMoney := bigE + bigT
-				trunced.Cost = bigMoney / co.MoneyUnit
-				dates[timeRange] = trunced
-			}
-		}
-		var costData []db.RequestSummary
-		for _, trunced := range dates {
-			costData = append(costData, trunced)
-		}
-		data = costData
+	tm := db.GetFilterTruncMap()
+	granularity := tm[gr.filter]
+	if granularity == "" {
+		// Default to day buckets for filters that are not explicitly listed.
+		granularity = "day"
 	}
 
-	return data
+	dates := make(map[time.Time]db.RequestSummary)
+
+	for i, entry := range requestRows {
+		entry.Cost, entry.IsEstimated = g.GetCost(entry)
+
+		y, m, d := entry.RequestTime.Date()
+		var timeRange time.Time
+		switch granularity {
+		case "hour":
+			timeRange = time.Date(y, m, d, entry.RequestTime.Hour(), 0, 0, 0, time.UTC)
+		case "day":
+			timeRange = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+		case "month":
+			timeRange = time.Date(y, m, 0, 0, 0, 0, 0, time.UTC)
+		default:
+			timeRange = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+		}
+
+		// Ensure the chart axis uses the bucket boundary, not the raw request timestamp.
+		entry.RequestTime = timeRange
+
+		if existing, ok := dates[timeRange]; !ok || existing.ID == "" {
+			dates[timeRange] = entry
+			continue
+		}
+
+		trunced := dates[timeRange]
+		bigT := trunced.Cost * co.MoneyUnit
+		bigE := entry.Cost * co.MoneyUnit
+		bigMoney := bigE + bigT
+		trunced.Cost = bigMoney / co.MoneyUnit
+		trunced.IsEstimated = trunced.IsEstimated || entry.IsEstimated
+		dates[timeRange] = trunced
+
+		log.Printf("Entry %v", i)
+	}
+
+	costData := make([]db.RequestSummary, 0, len(dates))
+	for _, trunced := range dates {
+		costData = append(costData, trunced)
+	}
+	sort.Slice(costData, func(i, j int) bool {
+		return costData[i].RequestTime.Before(costData[j].RequestTime)
+	})
+	return costData
 }
 func (g *GraphHandler) GetCost(row db.RequestSummary) (float64, bool) {
 
@@ -379,57 +403,40 @@ func (g *GraphHandler) SetTableGraphData(gr *Graph, d []db.RequestSummary) (*Tab
 
 func (g *GraphHandler) getCostData(dbs db.RequestSummary) (totalCosts int, estimated bool) {
 	// Delegate to helper so tests can invoke the same logic without DB access.
-	costs := g.a.db.LookupCosts(dbs.Model)
+	costs, ok := g.costsCache[dbs.Model]
+	if !ok {
+		costs = g.a.db.LookupCosts(dbs.Model)
+		g.costsCache[dbs.Model] = costs
+	}
 	return computeCosts(costs, dbs)
 }
 
 // computeCosts computes the total cost (in smallest money unit) for a request
-// given a list of recorded costs. This mirrors the logic that was previously
-// embedded in getCostData and is kept here so unit tests can exercise it
-// without needing a database.
+// given a list of recorded costs.
 func computeCosts(costs []db.Costs, dbs db.RequestSummary) (totalCosts int, estimated bool) {
-	log.Println(costs, dbs.Model)
-	var in, out int
+	inputTokenCount := dbs.InputTokenCount
+	cachedInputTokenCount := dbs.CachedInputTokenCount
+	outputTokenCount := dbs.OutputTokenCount
 
-	y, m, d := dbs.RequestTime.Date()
-	requestDay := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
-
-	dayToNextEntry := 0
-
-	// if no record on the same day is found, check if there is one in the range of 10 days
-	for dayToNextEntry < 10 {
-		for _, daybetween := range []int{dayToNextEntry, dayToNextEntry * -1} {
-			for _, c := range costs {
-				y, m, d := c.RequestTime.Date()
-				d = d + daybetween
-				costDay := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
-
-				if costDay == requestDay && c.UnitOfMeasure == "1K" {
-					if c.TokenType == "Outp" {
-						out = dbs.TokenCountComplete * c.RetailPrice / 1000
-					}
-					if c.TokenType == "Inp" {
-						// Input costs must be calculated from the prompt token count.
-						in = dbs.TokenCountPrompt * c.RetailPrice / 1000
-					}
-				}
-			}
-			log.Println("Before Condition db: ", daybetween, " out:", out)
-			if dayToNextEntry == 0 && out != 0 {
-				return in + out, false
-			}
-		}
-		dayToNextEntry++
+	// Legacy fallback: graph code historically used TokenCountPrompt/TokenCountComplete.
+	// When per-request input/cached/output counts aren't populated, treat prompt as full input and cached as 0.
+	if inputTokenCount == 0 && cachedInputTokenCount == 0 && outputTokenCount == 0 {
+		inputTokenCount = dbs.TokenCountPrompt
+		cachedInputTokenCount = 0
+		outputTokenCount = dbs.TokenCountComplete
 	}
 
-	// Handle no Cost of Tokens in DB to give Assumption to the User even if there is no record in 10 days range
-	if out == 0 {
-		var tmp int
-		tmp = co.MoneyUnit * 0.0026
-		in := dbs.TokenCountPrompt * tmp / 1000
-		tmp = co.MoneyUnit * 0.0105
-		out = dbs.TokenCountComplete * tmp / 1000
-		log.Println("set Out and in to", out, in)
+	res := db.ResolveRequestCostStage(costs, db.RequestCostStageResolutionRequest{
+		Model:                 dbs.Model,
+		RequestTime:           dbs.RequestTime,
+		InputTokenCount:       inputTokenCount,
+		CachedInputTokenCount: cachedInputTokenCount,
+		OutputTokenCount:      outputTokenCount,
+		StageType:             db.ContextLengthStageType,
+	})
+
+	if res.Missing {
+		return 0, true
 	}
-	return in + out, true
+	return int(res.TotalCost * float64(co.MoneyUnit)), false
 }

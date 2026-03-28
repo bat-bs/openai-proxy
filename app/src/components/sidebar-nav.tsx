@@ -1,6 +1,13 @@
 "use client";
 
-import { BarChart3, Coins, FileText, KeyRound, Users } from "lucide-react";
+import {
+	BarChart3,
+	Boxes,
+	Coins,
+	FileText,
+	KeyRound,
+	Users,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -31,6 +38,11 @@ const adminItems = [
 		href: "/admin/costs",
 		label: "Kosten",
 		icon: Coins,
+	},
+	{
+		href: "/admin/models",
+		label: "Modelle",
+		icon: Boxes,
 	},
 ];
 

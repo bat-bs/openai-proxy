@@ -63,43 +63,14 @@ type baseHandle struct {
 }
 
 func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	backend := r.Header.Get("Backend")
-	r.Header.Del("Backend")
-
 	// Intercept OpenAI-compatible models endpoints and serve locally
 	if strings.HasPrefix(r.URL.Path, "/api/models") || strings.HasPrefix(r.URL.Path, "/api/v1/models") {
 		h.handleModels(w, r)
 		return
 	}
-
-	if fn, ok := backendProxy[backend]; ok {
-		fn.ServeHTTP(w, r)
-		return
-	}
-
-	// See if backend is OpenAI compatible
-	_, ok := OpenAIbackendService[backend]
-
-	if ok {
-		//h.HandleOpenAI(w, r, backend)
-		return
-	}
-	if backend == "azure" {
-		h.HandleAzure(w, r, backend)
-		return
-	}
-
-	if backend == "" {
-		if defaultBackend == "azure" {
-			h.HandleAzure(w, r, defaultBackend)
-			return
-		} else {
-			//h.HandleOpenAI(w, r, defaultBackend)
-			return
-		}
-	}
-
-	w.Write([]byte("404: Backend not found "))
+	// The only fully supported runtime path today is the Azure OpenAI proxy.
+	// Routing by the request `Backend` header is intentionally removed.
+	h.HandleAzure(w, r, "azure")
 }
 
 // Since OpenAI and Azure API are not really compatible, we need 2 different handler functions

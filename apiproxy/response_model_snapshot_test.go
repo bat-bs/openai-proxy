@@ -4,10 +4,10 @@ import "testing"
 
 func TestSplitModelSnapshot(t *testing.T) {
 	tests := []struct {
-		name          string
-		model         string
-		wantModel     string
-		wantSnapshot  string
+		name         string
+		model        string
+		wantModel    string
+		wantSnapshot string
 	}{
 		{
 			name:         "model with snapshot suffix",

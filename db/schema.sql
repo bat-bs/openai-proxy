@@ -16,19 +16,31 @@ CREATE TABLE IF NOT EXISTS apiKeys (
     UUID        VARCHAR(255) NOT NULL PRIMARY KEY,
     ApiKey      VARCHAR(255) NOT NULL,
     Owner       VARCHAR(255) NOT NULL REFERENCES users(id),
-    AiApi       VARCHAR(255),
     Description VARCHAR(255)
 );
 CREATE TABLE IF NOT EXISTS costs (
+    id bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     model VARCHAR(255) NOT NULL,
     price integer NOT NULL,
-    request_day date DEFAULT now(),
-    token_type VARCHAR(255), 
+    valid_from date DEFAULT now() NOT NULL,
+    token_type VARCHAR(255) NOT NULL,
     unit_of_messure VARCHAR(255),
-    is_regional BOOLEAN,
-    backend_name VARCHAR(255),
     currency CHAR(3),
-    PRIMARY KEY(model,request_day,token_type,is_regional,price,backend_name)
+    stage_type text NOT NULL DEFAULT 'context_length',
+    stage_min_tokens integer NOT NULL DEFAULT 0,
+    stage_max_tokens integer NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS costs_natural_key_idx
+ON costs (
+    model,
+    valid_from,
+    token_type,
+    unit_of_messure,
+    currency,
+    stage_type,
+    stage_min_tokens,
+    COALESCE(stage_max_tokens, -1)
 );
 
 CREATE TABLE IF NOT EXISTS requests (
@@ -39,4 +51,3 @@ CREATE TABLE IF NOT EXISTS requests (
     token_count_complete integer NOT NULL,
     model VARCHAR(255)
 );
-

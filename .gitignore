@@ -7,3 +7,5 @@ vendor/
 .direnv
 
 .idea
+
+local-dev/postgres-data-fresh

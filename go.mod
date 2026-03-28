@@ -17,6 +17,7 @@ require (
 require (
 	ariga.io/atlas v0.19.1-0.20240218093714-1a4929bdea1f // indirect
 	dario.cat/mergo v1.0.1 // indirect
+	github.com/DATA-DOG/go-sqlmock v1.5.2 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.3.0 // indirect
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect

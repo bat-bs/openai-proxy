@@ -201,6 +201,15 @@ export const costUnit = pgEnum("cost_unit", ["1M", "1K"]);
 export const costs = pgTable(
 	"costs",
 	{
+		id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({
+			name: "costs_id_seq",
+			startWith: 1,
+			increment: 1,
+			minValue: 1,
+			// biome-ignore lint/correctness/noPrecisionLoss: matches Postgres BIGINT max.
+			maxValue: 9223372036854775807,
+			cache: 1,
+		}),
 		model: varchar({ length: 255 }).notNull(),
 		price: integer().notNull(),
 		validFrom: date("valid_from").defaultNow().notNull(),
@@ -209,18 +218,9 @@ export const costs = pgTable(
 		isRegional: boolean("is_regional").notNull(),
 		backendName: varchar("backend_name", { length: 255 }).notNull(),
 		currency: char({ length: 3 }),
+		stageType: text("stage_type").notNull().default("context_length"),
+		stageMinTokens: integer("stage_min_tokens").notNull().default(0),
+		stageMaxTokens: integer("stage_max_tokens"),
 	},
-	(table) => [
-		primaryKey({
-			columns: [
-				table.model,
-				table.price,
-				table.validFrom,
-				table.tokenType,
-				table.isRegional,
-				table.backendName,
-			],
-			name: "costs_pkey",
-		}),
-	],
+	(_table) => [],
 );

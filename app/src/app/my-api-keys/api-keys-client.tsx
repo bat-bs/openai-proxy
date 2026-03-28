@@ -158,18 +158,20 @@ export function ApiKeysClient() {
 									</div>
 									<DialogFooter showCloseButton>
 										<div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-											<Button
-												disabled={createApiKey.isPending}
-												onClick={() =>
-													createApiKey.mutate({
-														description: description.trim() || undefined,
-													})
-												}
-											>
-												{createApiKey.isPending
-													? "Wird erstellt..."
-													: "Schlüssel erstellen"}
-											</Button>
+											{token ? null : (
+												<Button
+													disabled={createApiKey.isPending}
+													onClick={() =>
+														createApiKey.mutate({
+															description: description.trim() || undefined,
+														})
+													}
+												>
+													{createApiKey.isPending
+														? "Wird erstellt..."
+														: "Schlüssel erstellen"}
+												</Button>
+											)}
 											{createApiKey.error ? (
 												<span className="text-destructive text-xs">
 													Schlüssel konnte nicht erstellt werden. Bitte erneut
