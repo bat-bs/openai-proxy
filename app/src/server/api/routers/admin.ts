@@ -17,6 +17,9 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 });
 
 const rangeInput = z.enum(["24h", "7d", "30d", "all"]);
+const modelInput = z.object({
+	modelId: z.string().trim().min(1).max(255),
+});
 const costInput = z.object({
 	id: z.number().int().positive().optional(),
 	model: z.string().trim().min(1).max(255),
@@ -142,6 +145,19 @@ export const adminRouter = createTRPCRouter({
 			.orderBy(models.id);
 		return rows.map((row) => row.id);
 	}),
+	addModel: adminProcedure
+		.input(modelInput)
+		.mutation(async ({ ctx, input }) => {
+			await ctx.db
+				.insert(models)
+				.values({ id: input.modelId })
+				.onConflictDoNothing();
+		}),
+	deleteModel: adminProcedure
+		.input(modelInput)
+		.mutation(async ({ ctx, input }) => {
+			await ctx.db.delete(models).where(eq(models.id, input.modelId));
+		}),
 	listCosts: adminProcedure.query(async ({ ctx }) => {
 		const rows = await ctx.db
 			.select({
@@ -164,19 +180,19 @@ export const adminRouter = createTRPCRouter({
 				costs.stageMinTokens,
 			);
 
-			return rows.map((row) => ({
-				...row,
-				price: Number(row.price ?? 0),
-				validFrom: row.validFrom ?? null,
-				currency: row.currency ? row.currency.trim() : null,
-				stageType:
-					row.stageType === CostStageType.ContextLength
-						? CostStageType.ContextLength
-						: null,
-				stageMinTokens: Number(row.stageMinTokens ?? 0),
-				stageMaxTokens: row.stageMaxTokens ?? null,
-			}));
-		}),
+		return rows.map((row) => ({
+			...row,
+			price: Number(row.price ?? 0),
+			validFrom: row.validFrom ?? null,
+			currency: row.currency ? row.currency.trim() : null,
+			stageType:
+				row.stageType === CostStageType.ContextLength
+					? CostStageType.ContextLength
+					: null,
+			stageMinTokens: Number(row.stageMinTokens ?? 0),
+			stageMaxTokens: row.stageMaxTokens ?? null,
+		}));
+	}),
 	createCost: adminProcedure
 		.input(costInput)
 		.mutation(async ({ ctx, input }) => {
@@ -240,9 +256,7 @@ export const adminRouter = createTRPCRouter({
 			}
 
 			const stageType =
-				update.stageType ??
-				original.stageType ??
-				CostStageType.ContextLength;
+				update.stageType ?? original.stageType ?? CostStageType.ContextLength;
 			const stageMinTokens =
 				update.stageMinTokens ?? original.stageMinTokens ?? 0;
 			const stageMaxTokens =
