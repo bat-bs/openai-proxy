@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { costUnitOptions } from "~/lib/costs";
+import { CostStageType, costUnitOptions } from "~/lib/costs";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { apikeys, costs, models, requests, users } from "~/server/db/schema";
 
@@ -25,7 +25,7 @@ const costInput = z.object({
 	tokenType: z.string().trim().min(1).max(255),
 	unitOfMessure: z.enum(costUnitOptions).optional().nullable(),
 	currency: z.string().trim().length(3).optional().nullable(),
-	stageType: z.string().trim().min(1).max(255).optional().nullable(),
+	stageType: z.nativeEnum(CostStageType).optional().nullable(),
 	stageMinTokens: z.number().int().min(0).optional(),
 	stageMaxTokens: z.number().int().min(0).optional().nullable(),
 });
@@ -164,22 +164,25 @@ export const adminRouter = createTRPCRouter({
 				costs.stageMinTokens,
 			);
 
-		return rows.map((row) => ({
-			...row,
-			price: Number(row.price ?? 0),
-			validFrom: row.validFrom ?? null,
-			currency: row.currency ? row.currency.trim() : null,
-			stageType: row.stageType ? row.stageType.trim() : null,
-			stageMinTokens: Number(row.stageMinTokens ?? 0),
-			stageMaxTokens: row.stageMaxTokens ?? null,
-		}));
-	}),
+			return rows.map((row) => ({
+				...row,
+				price: Number(row.price ?? 0),
+				validFrom: row.validFrom ?? null,
+				currency: row.currency ? row.currency.trim() : null,
+				stageType:
+					row.stageType === CostStageType.ContextLength
+						? CostStageType.ContextLength
+						: null,
+				stageMinTokens: Number(row.stageMinTokens ?? 0),
+				stageMaxTokens: row.stageMaxTokens ?? null,
+			}));
+		}),
 	createCost: adminProcedure
 		.input(costInput)
 		.mutation(async ({ ctx, input }) => {
 			const validFrom =
 				input.validFrom?.trim() || new Date().toISOString().slice(0, 10);
-			const stageType = input.stageType?.trim() || "context_length";
+			const stageType = input.stageType ?? CostStageType.ContextLength;
 			const stageMinTokens = input.stageMinTokens ?? 0;
 			const stageMaxTokens = input.stageMaxTokens ?? null;
 
@@ -204,7 +207,7 @@ export const adminRouter = createTRPCRouter({
 		.mutation(async ({ ctx, input }) => {
 			const validFrom = new Date().toISOString().slice(0, 10);
 			const update = input.update;
-			const stageType = update.stageType?.trim() || "context_length";
+			const stageType = update.stageType ?? CostStageType.ContextLength;
 			const stageMinTokens = update.stageMinTokens ?? 0;
 			const stageMaxTokens = update.stageMaxTokens ?? null;
 
@@ -237,9 +240,9 @@ export const adminRouter = createTRPCRouter({
 			}
 
 			const stageType =
-				update.stageType?.trim() ||
-				original.stageType?.trim() ||
-				"context_length";
+				update.stageType ??
+				original.stageType ??
+				CostStageType.ContextLength;
 			const stageMinTokens =
 				update.stageMinTokens ?? original.stageMinTokens ?? 0;
 			const stageMaxTokens =
@@ -273,7 +276,7 @@ export const adminRouter = createTRPCRouter({
 									eq(costs.tokenType, original.tokenType),
 									eq(
 										costs.stageType,
-										original.stageType?.trim() || "context_length",
+										original.stageType ?? CostStageType.ContextLength,
 									),
 									eq(costs.stageMinTokens, original.stageMinTokens ?? 0),
 									originalStageMaxTokens === null

@@ -8,7 +8,12 @@ import {
 	NativeSelect,
 	NativeSelectOption,
 } from "~/components/ui/native-select";
-import { type CostUnit, costUnitOptions } from "~/lib/costs";
+import {
+	CostStageType,
+	type CostUnit,
+	costStageTypeOptions,
+	costUnitOptions,
+} from "~/lib/costs";
 import { api } from "~/trpc/react";
 import { CostsTable } from "./costs-table";
 
@@ -31,7 +36,9 @@ export function CostsClient() {
 	const [validFrom, setValidFrom] = useState(todayString());
 	const [unitOfMessure, setUnitOfMessure] = useState<CostUnit>(defaultUnit);
 	const [currency, setCurrency] = useState(defaultCurrency);
-	const [stageType, setStageType] = useState("context_length");
+	const [stageType, setStageType] = useState<CostStageType>(
+		CostStageType.ContextLength,
+	);
 	const [stageMinTokens, setStageMinTokens] = useState(0);
 	const [stageMaxTokens, setStageMaxTokens] = useState<string>("");
 
@@ -43,7 +50,7 @@ export function CostsClient() {
 			setValidFrom(todayString());
 			setUnitOfMessure(defaultUnit);
 			setCurrency(defaultCurrency);
-			setStageType("context_length");
+			setStageType(CostStageType.ContextLength);
 			setStageMinTokens(0);
 			setStageMaxTokens("");
 			await utils.admin.listCosts.invalidate();
@@ -212,11 +219,20 @@ export function CostsClient() {
 								>
 									Stage Typ
 								</label>
-								<Input
+								<NativeSelect
+									className="w-full"
 									id="costs-create-stage-type"
-									onChange={(event) => setStageType(event.target.value)}
+									onChange={(event) =>
+										setStageType(event.target.value as CostStageType)
+									}
 									value={stageType}
-								/>
+								>
+									{costStageTypeOptions.map((stage) => (
+										<NativeSelectOption key={stage} value={stage}>
+											{stage}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
 							</div>
 							<div className="flex flex-col gap-1">
 								<label
@@ -265,7 +281,7 @@ export function CostsClient() {
 										tokenType: tokenType.trim(),
 										unitOfMessure: unitOfMessure ?? null,
 										currency: currency.trim() || null,
-										stageType: stageType.trim() || "context_length",
+										stageType,
 										stageMinTokens,
 										stageMaxTokens: stageMaxTokensValue,
 									})

@@ -35,7 +35,12 @@ import {
 	TableHeader,
 	TableRow,
 } from "~/components/ui/table";
-import { type CostUnit, costUnitOptions } from "~/lib/costs";
+import {
+	CostStageType,
+	type CostUnit,
+	costStageTypeOptions,
+	costUnitOptions,
+} from "~/lib/costs";
 
 export type CostRow = {
 	id: number;
@@ -45,7 +50,7 @@ export type CostRow = {
 	tokenType: string;
 	unitOfMessure: CostUnit | null;
 	currency: string | null;
-	stageType: string | null;
+	stageType: CostStageType | null;
 	stageMinTokens: number;
 	stageMaxTokens: number | null;
 };
@@ -58,7 +63,7 @@ type CostPayload = {
 	tokenType: string;
 	unitOfMessure?: CostUnit | null;
 	currency?: string | null;
-	stageType?: string | null;
+	stageType?: CostStageType | null;
 	stageMinTokens?: number;
 	stageMaxTokens?: number | null;
 };
@@ -112,7 +117,9 @@ function CostEditDialog({
 	const [tokenType, setTokenType] = useState(row.tokenType);
 	const [price, setPrice] = useState(String(row.price));
 	const [validFrom, setValidFrom] = useState(row.validFrom ?? todayString());
-	const [stageType, setStageType] = useState(row.stageType ?? "context_length");
+	const [stageType, setStageType] = useState<CostStageType>(
+		row.stageType ?? CostStageType.ContextLength,
+	);
 	const [stageMinTokens, setStageMinTokens] = useState(row.stageMinTokens);
 	const [stageMaxTokens, setStageMaxTokens] = useState(
 		row.stageMaxTokens === null ? "" : String(row.stageMaxTokens),
@@ -146,7 +153,7 @@ function CostEditDialog({
 			tokenType: row.tokenType,
 			unitOfMessure: row.unitOfMessure ?? null,
 			currency: row.currency ?? null,
-			stageType: row.stageType ?? "context_length",
+			stageType: row.stageType ?? CostStageType.ContextLength,
 			stageMinTokens: row.stageMinTokens,
 			stageMaxTokens: row.stageMaxTokens ?? null,
 		}),
@@ -166,7 +173,7 @@ function CostEditDialog({
 					setTokenType(row.tokenType);
 					setPrice(String(row.price));
 					setValidFrom(row.validFrom ?? todayString());
-					setStageType(row.stageType ?? "context_length");
+					setStageType(row.stageType ?? CostStageType.ContextLength);
 					setStageMinTokens(row.stageMinTokens);
 					setStageMaxTokens(
 						row.stageMaxTokens === null ? "" : String(row.stageMaxTokens),
@@ -278,11 +285,20 @@ function CostEditDialog({
 							>
 								Stage Typ
 							</label>
-							<Input
+							<NativeSelect
+								className="w-full"
 								id={`costs-stage-type-${fieldKey}`}
-								onChange={(event) => setStageType(event.target.value)}
+								onChange={(event) =>
+									setStageType(event.target.value as CostStageType)
+								}
 								value={stageType}
-							/>
+							>
+								{costStageTypeOptions.map((stage) => (
+									<NativeSelectOption key={stage} value={stage}>
+										{stage}
+									</NativeSelectOption>
+								))}
+							</NativeSelect>
 						</div>
 						<div className="flex flex-col gap-1">
 							<label
@@ -372,7 +388,7 @@ function CostEditDialog({
 									tokenType: tokenType.trim(),
 									unitOfMessure: unitOfMessure ?? null,
 									currency: currency.trim() || null,
-									stageType: stageType.trim() || "context_length",
+									stageType,
 									stageMinTokens,
 									stageMaxTokens: stageMaxTokensValue,
 								};
