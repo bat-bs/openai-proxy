@@ -712,7 +712,8 @@ export const reportingRouter = createTRPCRouter({
 					cachedInputTokens: number;
 					outputTokens: number;
 					totalCostScaled: bigint;
-					totalCostMissing: boolean;
+					totalCostHasKnownCost: boolean;
+					totalCostHasMissingCost: boolean;
 					currency: string | null;
 					models: Array<{
 						model: string;
@@ -733,7 +734,8 @@ export const reportingRouter = createTRPCRouter({
 			let totalCachedTokens = 0;
 			let totalOutputTokens = 0;
 			let totalCostScaled = 0n;
-			let totalCostMissing = false;
+			let totalCostHasKnownCost = false;
+			let totalCostHasMissingCost = false;
 			let totalCurrency: string | null = null;
 
 			for (const row of usageRows) {
@@ -745,7 +747,8 @@ export const reportingRouter = createTRPCRouter({
 					cachedInputTokens: 0,
 					outputTokens: 0,
 					totalCostScaled: 0n,
-					totalCostMissing: false,
+					totalCostHasKnownCost: false,
+					totalCostHasMissingCost: false,
 					currency: null,
 					models: [],
 				};
@@ -782,10 +785,8 @@ export const reportingRouter = createTRPCRouter({
 							totalCost: null,
 							currency: null,
 						});
-						entry.totalCostMissing = true;
-						entry.currency = null;
-						totalCostMissing = true;
-						totalCurrency = null;
+						entry.totalCostHasMissingCost = true;
+						totalCostHasMissingCost = true;
 					} else {
 						const modelCostScaled =
 							agg.inputCostScaled + agg.cachedCostScaled + agg.outputCostScaled;
@@ -804,9 +805,11 @@ export const reportingRouter = createTRPCRouter({
 						});
 
 						entry.totalCostScaled += modelCostScaled;
+						entry.totalCostHasKnownCost = true;
 						entry.currency = mergeCurrency(entry.currency, modelCurrency);
 
 						totalCostScaled += modelCostScaled;
+						totalCostHasKnownCost = true;
 						totalCurrency = mergeCurrency(totalCurrency, modelCurrency);
 					}
 				}
@@ -820,10 +823,11 @@ export const reportingRouter = createTRPCRouter({
 				inputTokens: user.inputTokens,
 				cachedInputTokens: user.cachedInputTokens,
 				outputTokens: user.outputTokens,
-				totalCost: user.totalCostMissing
-					? null
-					: scaledCostToNumber(user.totalCostScaled),
-				currency: user.totalCostMissing ? null : user.currency,
+				totalCost: user.totalCostHasKnownCost
+					? scaledCostToNumber(user.totalCostScaled)
+					: null,
+				currency: user.totalCostHasKnownCost ? user.currency : null,
+				hasMissingCosts: user.totalCostHasMissingCost,
 				models: user.models.sort((a, b) => a.model.localeCompare(b.model)),
 			}));
 
@@ -838,10 +842,11 @@ export const reportingRouter = createTRPCRouter({
 					inputTokens: totalInputTokens,
 					cachedInputTokens: totalCachedTokens,
 					outputTokens: totalOutputTokens,
-					totalCost: totalCostMissing
-						? null
-						: scaledCostToNumber(totalCostScaled),
-					currency: totalCostMissing ? null : totalCurrency,
+					totalCost: totalCostHasKnownCost
+						? scaledCostToNumber(totalCostScaled)
+						: null,
+					currency: totalCostHasKnownCost ? totalCurrency : null,
+					hasMissingCosts: totalCostHasMissingCost,
 				},
 				modelUsage: Array.from(modelTotals.entries())
 					.map(([model, outputTokens]) => ({

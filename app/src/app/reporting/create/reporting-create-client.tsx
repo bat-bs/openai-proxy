@@ -485,6 +485,11 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 								summary?.currency ?? "EUR",
 							)}
 						</div>
+						{summary?.hasMissingCosts ? (
+							<div className="mt-1 text-muted-foreground text-xs">
+								Teilweise unvollständig
+							</div>
+						) : null}
 					</div>
 				</div>
 				{reportLoading ? (
