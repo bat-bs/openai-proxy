@@ -39,8 +39,10 @@ import {
 	type BillingUnit,
 	billingUnitOptions,
 	CostStageType,
+	type CostTokenType,
 	type CostUnit,
 	costStageTypeOptions,
+	costTokenTypeOptions,
 	costUnitOptions,
 	type RequestType,
 	requestTypeOptions,
@@ -51,7 +53,7 @@ export type CostRow = {
 	model: string;
 	price: number;
 	validFrom: string | null;
-	tokenType: string | null;
+	tokenType: CostTokenType | null;
 	requestType: RequestType;
 	billingUnit: BillingUnit;
 	unitOfMessure: CostUnit | null;
@@ -66,7 +68,7 @@ type CostPayload = {
 	model: string;
 	price: number;
 	validFrom?: string;
-	tokenType?: string | null;
+	tokenType?: CostTokenType | null;
 	requestType: RequestType;
 	billingUnit: BillingUnit;
 	unitOfMessure?: CostUnit | null;
@@ -122,7 +124,9 @@ function CostEditDialog({
 	const [open, setOpen] = useState(false);
 	const [mode, setMode] = useState<"update" | "modify">("update");
 	const [model, setModel] = useState(row.model);
-	const [tokenType, setTokenType] = useState(row.tokenType ?? "");
+	const [tokenType, setTokenType] = useState<CostTokenType | "">(
+		row.tokenType ?? "input",
+	);
 	const [requestType, setRequestType] = useState<RequestType>(row.requestType);
 	const [billingUnit, setBillingUnit] = useState<BillingUnit>(row.billingUnit);
 	const [price, setPrice] = useState(String(row.price));
@@ -312,12 +316,20 @@ function CostEditDialog({
 								>
 									Token-Typ
 								</label>
-								<Input
+								<NativeSelect
+									className="w-full"
 									id={`costs-token-${fieldKey}`}
-									onChange={(event) => setTokenType(event.target.value)}
-									placeholder={"input"}
+									onChange={(event) =>
+										setTokenType(event.target.value as CostTokenType)
+									}
 									value={tokenType}
-								/>
+								>
+									{costTokenTypeOptions.map((type) => (
+										<NativeSelectOption key={type} value={type}>
+											{type}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
 							</div>
 						)}
 						<div className="flex flex-col gap-1">
@@ -465,7 +477,7 @@ function CostEditDialog({
 									requestType,
 									billingUnit,
 									tokenType:
-										requestType === "RERANK" ? null : tokenType.trim() || null,
+										requestType === "RERANK" ? null : tokenType || "input",
 									unitOfMessure: unitOfMessure ?? null,
 									currency: currency.trim() || null,
 									stageType:
@@ -518,7 +530,7 @@ export function CostsTable({
 	const [requestTypeFilter, setRequestTypeFilter] = useState<
 		"ALL" | RequestType
 	>("ALL");
-	const [tokenFilter, setTokenFilter] = useState("");
+	const [tokenFilter, setTokenFilter] = useState<CostTokenType | "">("");
 	const [currencyFilter, setCurrencyFilter] = useState("");
 	const [pagination, setPagination] = useState({
 		pageIndex: 0,
@@ -540,10 +552,7 @@ export function CostsTable({
 			) {
 				return false;
 			}
-			if (
-				tokenFilter &&
-				!(row.tokenType ?? "").toLowerCase().includes(tokenFilter.toLowerCase())
-			) {
+			if (tokenFilter && row.tokenType !== tokenFilter) {
 				return false;
 			}
 			if (
@@ -734,11 +743,21 @@ export function CostsTable({
 							</NativeSelectOption>
 						))}
 					</NativeSelect>
-					<Input
-						onChange={(event) => setTokenFilter(event.target.value)}
-						placeholder="Token-Typ"
+					<NativeSelect
+						aria-label="Token-Typ"
+						className="w-full"
+						onChange={(event) =>
+							setTokenFilter(event.target.value as CostTokenType | "")
+						}
 						value={tokenFilter}
-					/>
+					>
+						<NativeSelectOption value="">Alle Token-Typen</NativeSelectOption>
+						{costTokenTypeOptions.map((type) => (
+							<NativeSelectOption key={type} value={type}>
+								{type}
+							</NativeSelectOption>
+						))}
+					</NativeSelect>
 					<Input
 						onChange={(event) => setCurrencyFilter(event.target.value)}
 						placeholder="Währung"

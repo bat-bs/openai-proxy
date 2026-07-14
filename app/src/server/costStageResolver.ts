@@ -1,8 +1,13 @@
-import type { BillingUnit, CostUnit, RequestType } from "~/lib/costs";
+import type { BillingUnit, RequestType } from "~/lib/costs";
+import {
+	type CostTokenType,
+	type CostUnit,
+	canonicalizeCostTokenType,
+} from "~/lib/costs";
 
 const ContextLengthStageType = "context_length" as const;
 
-type CanonicalTokenType = "input" | "cached" | "output";
+type CanonicalTokenType = CostTokenType;
 
 export type CostStageRow = {
 	model: string;
@@ -33,6 +38,7 @@ export type RequestCostStageResolutionResult = {
 	missing: boolean;
 	inputCost: TokenCostStageResolutionResult;
 	cachedCost: TokenCostStageResolutionResult;
+	cacheWriteCost: TokenCostStageResolutionResult;
 	outputCost: TokenCostStageResolutionResult;
 };
 
@@ -47,36 +53,6 @@ export type RerankCostResolutionResult = {
 
 function normalizeKey(s: string) {
 	return s.trim().toLowerCase();
-}
-
-function canonicalTokenType(tokenType: string): CanonicalTokenType | string {
-	const t = normalizeKey(tokenType);
-	switch (t) {
-		// input-ish
-		case "input":
-		case "prompt":
-		case "input_tokens":
-		case "prompt_tokens":
-		case "inp":
-			return "input";
-		// cached-ish
-		case "cached":
-		case "cache":
-		case "cached_input":
-		case "input_cached":
-		case "cached_input_tokens":
-		case "cached_input_token":
-			return "cached";
-		// output-ish
-		case "output":
-		case "completion":
-		case "output_tokens":
-		case "completion_tokens":
-		case "outp":
-			return "output";
-		default:
-			return tokenType;
-	}
 }
 
 function toMs(value: string | Date | null | undefined) {
@@ -119,7 +95,8 @@ export function buildCostStageIndex(costRows: CostStageRow[]) {
 
 	for (const row of costRows) {
 		const modelKey = normalizeKey(row.model);
-		const tokenKey = canonicalTokenType(row.tokenType);
+		const tokenKey =
+			canonicalizeCostTokenType(row.tokenType) ?? normalizeKey(row.tokenType);
 		const stageTypeKey = normalizeKey(row.stageType || ContextLengthStageType);
 
 		// tokenKey is canonicalized to input/cached/output when possible.
@@ -294,17 +271,19 @@ export function resolveRequestCostStage(
 		requestTime: Date;
 		inputTokenCount: number;
 		cachedInputTokenCount: number;
+		cacheWriteTokenCount: number;
 		outputTokenCount: number;
 		stageType?: string;
 	},
 ): RequestCostStageResolutionResult {
 	const stageType = req.stageType?.trim() || ContextLengthStageType;
 
+	const cachedTokens = Math.max(0, req.cachedInputTokenCount);
+	const cacheWriteTokens = Math.max(0, req.cacheWriteTokenCount);
 	const promptTokens = Math.max(
 		0,
-		req.inputTokenCount - req.cachedInputTokenCount,
+		req.inputTokenCount - cachedTokens - cacheWriteTokens,
 	);
-	const cachedTokens = Math.max(0, req.cachedInputTokenCount);
 	const outputTokens = Math.max(0, req.outputTokenCount);
 
 	const modelKey = normalizeKey(req.model);
@@ -325,9 +304,14 @@ export function resolveRequestCostStage(
 
 	const inputCost = resolveForTokenType("input", promptTokens);
 	const cachedCost = resolveForTokenType("cached", cachedTokens);
+	const cacheWriteCost = resolveForTokenType("cache_write", cacheWriteTokens);
 	const outputCost = resolveForTokenType("output", outputTokens);
 
-	const missing = inputCost.missing || cachedCost.missing || outputCost.missing;
+	const missing =
+		inputCost.missing ||
+		cachedCost.missing ||
+		cacheWriteCost.missing ||
+		outputCost.missing;
 	if (missing) {
 		return {
 			totalCost: 0,
@@ -335,6 +319,7 @@ export function resolveRequestCostStage(
 			missing: true,
 			inputCost,
 			cachedCost,
+			cacheWriteCost,
 			outputCost,
 		};
 	}
@@ -342,6 +327,7 @@ export function resolveRequestCostStage(
 	const currencies = [
 		inputCost.usedCost?.currency,
 		cachedCost.usedCost?.currency,
+		cacheWriteCost.usedCost?.currency,
 		outputCost.usedCost?.currency,
 	]
 		.filter((c): c is string => Boolean(c))
@@ -356,11 +342,13 @@ export function resolveRequestCostStage(
 	}
 
 	return {
-		totalCost: inputCost.cost + cachedCost.cost + outputCost.cost,
+		totalCost:
+			inputCost.cost + cachedCost.cost + cacheWriteCost.cost + outputCost.cost,
 		currency,
 		missing: false,
 		inputCost,
 		cachedCost,
+		cacheWriteCost,
 		outputCost,
 	};
 }

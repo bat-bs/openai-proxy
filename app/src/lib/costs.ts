@@ -20,6 +20,49 @@ export const BillingUnit = {
 	Searches: "SEARCHES",
 } as const;
 
+export const costTokenTypeOptions = [
+	"input",
+	"cached",
+	"cache_write",
+	"output",
+] as const;
+
+export type CostTokenType = (typeof costTokenTypeOptions)[number];
+
+function normalizeCostTokenTypeValue(value: string) {
+	return value.trim().toLowerCase();
+}
+
+export function canonicalizeCostTokenType(value: string): CostTokenType | null {
+	switch (normalizeCostTokenTypeValue(value)) {
+		case "input":
+		case "prompt":
+		case "input_tokens":
+		case "prompt_tokens":
+		case "inp":
+			return "input";
+		case "cached":
+		case "cache":
+		case "cached_input":
+		case "input_cached":
+		case "cached_input_tokens":
+		case "cached_input_token":
+			return "cached";
+		case "cache_write":
+		case "cache-write":
+		case "cachewrite":
+			return "cache_write";
+		case "output":
+		case "completion":
+		case "output_tokens":
+		case "completion_tokens":
+		case "outp":
+			return "output";
+		default:
+			return null;
+	}
+}
+
 export enum CostStageType {
 	ContextLength = "context_length",
 }

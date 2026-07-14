@@ -5,6 +5,7 @@ import {
 	BillingUnit,
 	billingUnitOptions,
 	CostStageType,
+	canonicalizeCostTokenType,
 	costUnitOptions,
 	ModelType,
 	modelTypeOptions,
@@ -139,12 +140,16 @@ export const adminRouter = createTRPCRouter({
 					id: users.id,
 					name: users.name,
 					inputTokens:
-						sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
+						sql<number>`greatest(coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount} - ${requests.cacheWriteTokenCount}), 0), 0)`.as(
 							"inputTokens",
 						),
 					cachedTokens:
 						sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
 							"cachedTokens",
+						),
+					cacheWriteTokens:
+						sql<number>`coalesce(sum(${requests.cacheWriteTokenCount}), 0)`.as(
+							"cacheWriteTokens",
 						),
 					outputTokens:
 						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
@@ -199,6 +204,7 @@ export const adminRouter = createTRPCRouter({
 					name: row.name ?? row.id,
 					inputTokens: Number(row.inputTokens ?? 0),
 					cachedTokens: Number(row.cachedTokens ?? 0),
+					cacheWriteTokens: Number(row.cacheWriteTokens ?? 0),
 					outputTokens: Number(row.outputTokens ?? 0),
 					searchUnits: Number(row.searchUnits ?? 0),
 					/*
@@ -253,20 +259,34 @@ export const adminRouter = createTRPCRouter({
 				costs.stageMinTokens,
 			);
 
-		return rows.map((row) => ({
-			...row,
-			price: Number(row.price ?? 0),
-			validFrom: row.validFrom ?? null,
-			currency: row.currency ? row.currency.trim() : null,
-			stageType:
-				row.stageType === CostStageType.ContextLength
-					? CostStageType.ContextLength
-					: null,
-			stageMinTokens: Number(row.stageMinTokens ?? 0),
-			stageMaxTokens: row.stageMaxTokens ?? null,
-			requestType: row.requestType,
-			billingUnit: row.billingUnit,
-		}));
+		return rows.map((row) => {
+			const tokenType =
+				row.requestType === RequestType.Rerank
+					? null
+					: canonicalizeCostTokenType(row.tokenType ?? "");
+			if (row.requestType !== RequestType.Rerank && !tokenType) {
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Invalid costs.token_type for row id=${row.id}: raw token_type=${row.tokenType}`,
+				});
+			}
+
+			return {
+				...row,
+				tokenType,
+				price: Number(row.price ?? 0),
+				validFrom: row.validFrom ?? null,
+				currency: row.currency ? row.currency.trim() : null,
+				stageType:
+					row.stageType === CostStageType.ContextLength
+						? CostStageType.ContextLength
+						: null,
+				stageMinTokens: Number(row.stageMinTokens ?? 0),
+				stageMaxTokens: row.stageMaxTokens ?? null,
+				requestType: row.requestType,
+				billingUnit: row.billingUnit,
+			};
+		});
 	}),
 	createCost: adminProcedure
 		.input(costInput)

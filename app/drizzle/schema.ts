@@ -74,6 +74,9 @@ export const requests = pgTable(
 		cachedInputTokenCount: integer("cached_input_token_count"),
 		outputTokenCount: integer("output_token_count"),
 		searchUnits: integer("search_units"),
+		cacheWriteTokenCount: integer("cache_write_token_count")
+			.default(0)
+			.notNull(),
 		snapshotVersion: varchar("snapshot_version", { length: 255 }),
 		isApproximated: boolean("is_approximated").default(false).notNull(),
 	},

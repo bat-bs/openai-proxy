@@ -64,6 +64,7 @@ test("breakdown aggregation keeps resolved parts after missing rows", () => {
 		currency: null,
 		inputCost: { cost: 0 },
 		cachedCost: { cost: 0 },
+		cacheWriteCost: { cost: 0 },
 		outputCost: { cost: 0 },
 	});
 	addResolvedBreakdownCost(aggregate, {
@@ -71,22 +72,25 @@ test("breakdown aggregation keeps resolved parts after missing rows", () => {
 		currency: "EUR",
 		inputCost: { cost: 0.5 },
 		cachedCost: { cost: 0.25 },
+		cacheWriteCost: { cost: 0.125 },
 		outputCost: { cost: 0.75 },
 	});
 
 	assert.equal(aggregate.missing, true);
 	assert.equal(aggregate.inputCostScaled, 50000000n);
 	assert.equal(aggregate.cachedCostScaled, 25000000n);
+	assert.equal(aggregate.cacheWriteCostScaled, 12500000n);
 	assert.equal(aggregate.outputCostScaled, 75000000n);
 	assert.deepEqual(presentBreakdownCost(aggregate), {
 		missing: true,
 		inputCost: null,
 		cachedCost: null,
+		cacheWriteCost: null,
 		outputCost: null,
 		searchCost: null,
 		totalCost: null,
 		currency: null,
-		currencyTotals: [{ currency: "EUR", totalCost: 1.5 }],
+		currencyTotals: [{ currency: "EUR", totalCost: 1.625 }],
 	});
 });
 
@@ -145,6 +149,7 @@ test("breakdown keeps search costs in the currency total", () => {
 		currency: "USD",
 		inputCost: { cost: 0 },
 		cachedCost: { cost: 0 },
+		cacheWriteCost: { cost: 0 },
 		outputCost: { cost: 0 },
 		searchCost: { cost: 0.002 },
 	});
@@ -161,6 +166,7 @@ test("rerank breakdown keeps search cost separate from token costs", () => {
 		currency: "USD",
 		inputCost: { cost: 0 },
 		cachedCost: { cost: 0 },
+		cacheWriteCost: { cost: 0 },
 		outputCost: { cost: 0 },
 		searchCost: { cost: 2.5 },
 	});
@@ -170,6 +176,7 @@ test("rerank breakdown keeps search cost separate from token costs", () => {
 		currencyIssue: false,
 		inputCost: 0,
 		cachedCost: 0,
+		cacheWriteCost: 0,
 		outputCost: 0,
 		searchCost: 2.5,
 		totalCost: 2.5,
@@ -185,6 +192,7 @@ test("mixed token and search costs preserve their separate breakdowns", () => {
 		currency: "EUR",
 		inputCost: { cost: 1 },
 		cachedCost: { cost: 2 },
+		cacheWriteCost: { cost: 0 },
 		outputCost: { cost: 3 },
 		searchCost: { cost: 4 },
 	});
@@ -193,6 +201,33 @@ test("mixed token and search costs preserve their separate breakdowns", () => {
 	assert.equal(result.totalCost, 10);
 	assert.equal(result.inputCost, 1);
 	assert.equal(result.cachedCost, 2);
+	assert.equal(result.cacheWriteCost, 0);
 	assert.equal(result.outputCost, 3);
 	assert.equal(result.searchCost, 4);
+});
+
+test("breakdown aggregation includes cache write cost in totals", () => {
+	const aggregate = createBreakdownCostAggregate();
+	addResolvedBreakdownCost(aggregate, {
+		missing: false,
+		currency: "EUR",
+		inputCost: { cost: 0.5 },
+		cachedCost: { cost: 0.25 },
+		cacheWriteCost: { cost: 0.125 },
+		outputCost: { cost: 0.75 },
+	});
+
+	assert.equal(aggregate.cacheWriteCostScaled, 12500000n);
+	assert.deepEqual(presentBreakdownCost(aggregate), {
+		missing: false,
+		inputCost: 0.5,
+		cachedCost: 0.25,
+		cacheWriteCost: 0.125,
+		outputCost: 0.75,
+		searchCost: 0,
+		totalCost: 1.625,
+		currency: "EUR",
+		currencyIssue: false,
+		currencyTotals: [{ currency: "EUR", totalCost: 1.625 }],
+	});
 });

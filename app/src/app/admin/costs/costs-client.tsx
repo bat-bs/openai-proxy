@@ -12,8 +12,10 @@ import {
 	BillingUnit,
 	billingUnitOptions,
 	CostStageType,
+	type CostTokenType,
 	type CostUnit,
 	costStageTypeOptions,
+	costTokenTypeOptions,
 	costUnitOptions,
 	RequestType,
 	requestTypeOptions,
@@ -23,7 +25,7 @@ import { CostsTable } from "./costs-table";
 
 const defaultUnit = costUnitOptions[0];
 const defaultCurrency = "EUR";
-const defaultTokenType = "input";
+const defaultTokenType = costTokenTypeOptions[0];
 
 function todayString() {
 	return new Date().toISOString().slice(0, 10);
@@ -35,7 +37,9 @@ export function CostsClient() {
 	const { data: models = [] } = api.admin.listModels.useQuery();
 
 	const [model, setModel] = useState("");
-	const [tokenType, setTokenType] = useState(defaultTokenType);
+	const [tokenType, setTokenType] = useState<CostTokenType | "">(
+		defaultTokenType,
+	);
 	const [requestType, setRequestType] = useState<RequestType>(
 		RequestType.ChatCompletion,
 	);
@@ -155,12 +159,20 @@ export function CostsClient() {
 									>
 										Token-Typ
 									</label>
-									<Input
+									<NativeSelect
+										className="w-full"
 										id="costs-create-token-type"
-										onChange={(event) => setTokenType(event.target.value)}
-										placeholder="input"
+										onChange={(event) =>
+											setTokenType(event.target.value as CostTokenType)
+										}
 										value={tokenType}
-									/>
+									>
+										{costTokenTypeOptions.map((type) => (
+											<NativeSelectOption key={type} value={type}>
+												{type}
+											</NativeSelectOption>
+										))}
+									</NativeSelect>
 								</div>
 							)}
 							<div className="flex flex-col gap-1">

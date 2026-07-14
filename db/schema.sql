@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS requests (
     request_type request_type NOT NULL,
     input_token_count integer,
     cached_input_token_count integer,
+    cache_write_token_count integer NOT NULL DEFAULT 0,
     output_token_count integer,
     search_units integer,
     model VARCHAR(255),
