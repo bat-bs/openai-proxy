@@ -33,6 +33,7 @@ type RequestCostStageResolutionRequest struct {
 	RequestTime           time.Time
 	InputTokenCount       int
 	CachedInputTokenCount int
+	CacheWriteTokenCount  int
 	OutputTokenCount      int
 	StageType             string
 }
@@ -57,9 +58,10 @@ type RequestCostStageResolutionResult struct {
 	Currency  string // empty when missing or currency mismatch
 	Missing   bool
 
-	InputCost  TokenCostStageResolutionResult
-	CachedCost TokenCostStageResolutionResult
-	OutputCost TokenCostStageResolutionResult
+	InputCost      TokenCostStageResolutionResult
+	CachedCost     TokenCostStageResolutionResult
+	CacheWriteCost TokenCostStageResolutionResult
+	OutputCost     TokenCostStageResolutionResult
 }
 
 func normalizeKey(s string) string {
@@ -73,6 +75,8 @@ func canonicalTokenTypeKey(tokenType string) string {
 		return "input"
 	case "cached", "cache", "cached_input", "input_cached", "cached_input_tokens", "cached_input_token":
 		return "cached"
+	case "cache_write", "cache-write", "cachewrite":
+		return "cache_write"
 	case "output", "completion", "output_tokens", "completion_tokens", "outp":
 		return "output"
 	default:
@@ -276,13 +280,17 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 		req.RequestType = RequestTypeChatCompletion
 	}
 
-	promptTokens := req.InputTokenCount - req.CachedInputTokenCount
-	if promptTokens < 0 {
-		promptTokens = 0
-	}
 	cachedTokens := req.CachedInputTokenCount
 	if cachedTokens < 0 {
 		cachedTokens = 0
+	}
+	cacheWriteTokens := req.CacheWriteTokenCount
+	if cacheWriteTokens < 0 {
+		cacheWriteTokens = 0
+	}
+	promptTokens := req.InputTokenCount - cachedTokens - cacheWriteTokens
+	if promptTokens < 0 {
+		promptTokens = 0
 	}
 	outputTokens := req.OutputTokenCount
 	if outputTokens < 0 {
@@ -309,6 +317,14 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 		InputTokensForStage: req.InputTokenCount,
 		TokensToBill:        cachedTokens,
 	})
+	cacheWriteRes := ResolveTokenCostStage(costRows, TokenCostStageResolutionRequest{
+		Model:               req.Model,
+		TokenType:           "cache_write",
+		StageType:           req.StageType,
+		RequestTime:         req.RequestTime,
+		InputTokensForStage: req.InputTokenCount,
+		TokensToBill:        cacheWriteTokens,
+	})
 	outputRes := ResolveTokenCostStage(costRows, TokenCostStageResolutionRequest{
 		Model:               req.Model,
 		TokenType:           "output",
@@ -321,15 +337,16 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 	})
 
 	// Missing if any token type that has >0 tokens can't be resolved.
-	missing := inputRes.Missing || cachedRes.Missing || outputRes.Missing
+	missing := inputRes.Missing || cachedRes.Missing || cacheWriteRes.Missing || outputRes.Missing
 	if missing {
 		return RequestCostStageResolutionResult{
-			TotalCost:  0,
-			Currency:   "",
-			Missing:    true,
-			InputCost:  inputRes,
-			CachedCost: cachedRes,
-			OutputCost: outputRes,
+			TotalCost:      0,
+			Currency:       "",
+			Missing:        true,
+			InputCost:      inputRes,
+			CachedCost:     cachedRes,
+			CacheWriteCost: cacheWriteRes,
+			OutputCost:     outputRes,
 		}
 	}
 
@@ -340,6 +357,9 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 	}
 	if cachedRes.UsedCost != nil && cachedRes.Currency != "" {
 		currencies = append(currencies, cachedRes.Currency)
+	}
+	if cacheWriteRes.UsedCost != nil && cacheWriteRes.Currency != "" {
+		currencies = append(currencies, cacheWriteRes.Currency)
 	}
 	if outputRes.UsedCost != nil && outputRes.Currency != "" {
 		currencies = append(currencies, outputRes.Currency)
@@ -359,14 +379,15 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 		}
 	}
 
-	total := inputRes.Cost + cachedRes.Cost + outputRes.Cost
+	total := inputRes.Cost + cachedRes.Cost + cacheWriteRes.Cost + outputRes.Cost
 	return RequestCostStageResolutionResult{
-		TotalCost:  total,
-		Currency:   currency,
-		Missing:    false,
-		InputCost:  inputRes,
-		CachedCost: cachedRes,
-		OutputCost: outputRes,
+		TotalCost:      total,
+		Currency:       currency,
+		Missing:        false,
+		InputCost:      inputRes,
+		CachedCost:     cachedRes,
+		CacheWriteCost: cacheWriteRes,
+		OutputCost:     outputRes,
 	}
 }
 

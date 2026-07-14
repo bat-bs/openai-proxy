@@ -40,6 +40,34 @@ type Content struct {
 	UsageDetails map[string]map[string]int
 }
 
+func buildRequestRecord(
+	apiKeyID string,
+	requestID string,
+	modelAlias string,
+	snapshot string,
+	promptTokens int,
+	completionTokens int,
+	inputTokens int,
+	cachedTokens int,
+	cacheWriteTokens int,
+	approximated bool,
+) db.Request {
+	return db.Request{
+		ID:                    requestID,
+		ApiKeyID:              apiKeyID,
+		RequestType:           db.RequestTypeChatCompletion,
+		TokenCountPrompt:      intPointer(promptTokens),
+		TokenCountComplete:    intPointer(completionTokens),
+		InputTokenCount:       intPointer(inputTokens),
+		CachedInputTokenCount: intPointer(cachedTokens),
+		CacheWriteTokenCount:  cacheWriteTokens,
+		OutputTokenCount:      intPointer(completionTokens),
+		Model:                 modelAlias,
+		SnapshotVersion:       snapshot,
+		IsApproximated:        approximated,
+	}
+}
+
 func (rc *ResponseConf) NewResponse(in *http.Response) error {
 	if in.Request == nil || in.Request.URL == nil || !isUsagePersistencePath(in.Request.URL.Path) {
 		return nil
@@ -201,29 +229,17 @@ func (r *Response) ProcessValues() {
 		return
 	}
 	// Extract token counts using flexible key mapping (handles input_tokens/output_tokens etc.).
-	pcount, ccount, tot, cached := extractTokenCounts(c.Usage, c.UsageDetails)
+	pcount, ccount, tot, cached, cacheWrite := extractTokenCounts(c.Usage, c.UsageDetails)
 	if os.Getenv("DEV_LOG_TOKEN_DEBUG") == "1" {
 		log.Printf("DEV DEBUG: ProcessValues extracted counts prompt=%d completion=%d total=%d cached=%d usage=%v details=%v", pcount, ccount, tot, cached, c.Usage, c.UsageDetails)
 	}
 	modelAlias, snapshot := splitModelSnapshot(c.Model)
 	promptTokens := dedupPromptTokens(pcount, cached)
-	rq := db.Request{
-		ID:                    c.ID,
-		ApiKeyID:              r.apiKeyID,
-		RequestType:           db.RequestTypeChatCompletion,
-		TokenCountPrompt:      &promptTokens,
-		TokenCountComplete:    &ccount,
-		InputTokenCount:       &pcount,
-		CachedInputTokenCount: &cached,
-		OutputTokenCount:      &ccount,
-		Model:                 modelAlias,
-		SnapshotVersion:       snapshot,
-		IsApproximated:        false,
-	}
+	rq := buildRequestRecord(r.apiKeyID, c.ID, modelAlias, snapshot, promptTokens, ccount, pcount, cached, cacheWrite, false)
 
 	if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
 		total := promptTokens + ccount
-		log.Printf("DEV LOG: Token counts for Response id=%s api_key_id=%s model=%s prompt=%d completion=%d total=%d usage=%v", r.apiKeyID, rq.ApiKeyID, rq.Model, rq.TokenCountPrompt, rq.TokenCountComplete, total, c.Usage)
+		log.Printf("DEV LOG: Token counts for Response id=%s api_key_id=%s model=%s prompt=%d completion=%d total=%d usage=%v", r.apiKeyID, rq.ApiKeyID, rq.Model, promptTokens, ccount, total, c.Usage)
 	}
 
 	if rq.ID == "" {
@@ -256,9 +272,9 @@ func intPointer(value int) *int {
 
 // extractTokenCounts maps a flexible usage map into prompt/completion/total
 // counts and also returns how many of the prompt tokens were cached.
-func extractTokenCounts(totals map[string]int, details map[string]map[string]int) (prompt int, completion int, total int, cached int) {
+func extractTokenCounts(totals map[string]int, details map[string]map[string]int) (prompt int, completion int, total int, cached int, cacheWrite int) {
 	if totals == nil {
-		return 0, 0, 0, 0
+		return 0, 0, 0, 0, 0
 	}
 
 	promptKeys := []string{"prompt_tokens", "input_tokens", "prompt"}
@@ -269,6 +285,7 @@ func extractTokenCounts(totals map[string]int, details map[string]map[string]int
 	completion = findFirstTotalValue(totals, completionKeys)
 	total = findFirstTotalValue(totals, totalKeys)
 	cached = findCachedTokens(details, totals)
+	cacheWrite = findCacheWriteTokens(details, totals)
 
 	if completion == 0 && total > 0 && prompt > 0 {
 		completion = total - prompt
@@ -280,6 +297,20 @@ func extractTokenCounts(totals map[string]int, details map[string]map[string]int
 		total = prompt + completion
 	}
 	return
+}
+
+func findCacheWriteTokens(details map[string]map[string]int, totals map[string]int) int {
+	for _, candidate := range []string{"prompt_tokens_details", "input_tokens_details"} {
+		if detail, ok := details[candidate]; ok {
+			if value := detail["cache_write_tokens"]; value > 0 {
+				return value
+			}
+		}
+	}
+	if value := totals["cache_write_tokens"]; value > 0 {
+		return value
+	}
+	return 0
 }
 
 func findFirstTotalValue(m map[string]int, keys []string) int {
@@ -418,7 +449,7 @@ func readSSELine(br *bufio.Reader, maxBytes int) (string, error) {
 
 func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 	// Re-use logic from the previous implementation but for a stream
-	var cumPrompt, cumCompletion, cumCached int
+	var cumPrompt, cumCompletion, cumCached, cumCacheWrite int
 	var accumulatedText strings.Builder
 	var lastModel, lastID string
 	var foundAny bool
@@ -477,13 +508,14 @@ func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 		}
 
 		var usageFound bool
-		var pcount, ccount, cached int
+		var pcount, ccount, cached, cacheWrite int
 		if u, ok := raw["usage"].(map[string]interface{}); ok {
 			totals, details := parseUsageMap(u)
-			pcount, ccount, _, cached = extractTokenCounts(totals, details)
+			pcount, ccount, _, cached, cacheWrite = extractTokenCounts(totals, details)
 			cumPrompt = max(cumPrompt, pcount)
 			cumCompletion = max(cumCompletion, ccount)
 			cumCached = max(cumCached, cached)
+			cumCacheWrite = max(cumCacheWrite, cacheWrite)
 			foundAny = true
 			eventIdx++
 			usageFound = true
@@ -496,10 +528,11 @@ func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 			if respObj, ok := raw["response"].(map[string]interface{}); ok {
 				if u2, ok2 := respObj["usage"].(map[string]interface{}); ok2 {
 					totals, details := parseUsageMap(u2)
-					pcount, ccount, _, cached = extractTokenCounts(totals, details)
+					pcount, ccount, _, cached, cacheWrite = extractTokenCounts(totals, details)
 					cumPrompt = max(cumPrompt, pcount)
 					cumCompletion = max(cumCompletion, ccount)
 					cumCached = max(cumCached, cached)
+					cumCacheWrite = max(cumCacheWrite, cacheWrite)
 					foundAny = true
 					eventIdx++
 					usageFound = true
@@ -562,6 +595,7 @@ func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 					finalPrompt := pcount
 					finalCompletion := ccount
 					finalCached := cached
+					finalCacheWrite := cacheWrite
 
 					if finalPrompt == 0 {
 						finalPrompt = cumPrompt
@@ -571,6 +605,9 @@ func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 					}
 					if finalCached == 0 {
 						finalCached = cumCached
+					}
+					if finalCacheWrite == 0 {
+						finalCacheWrite = cumCacheWrite
 					}
 
 					// Estimation fallback for completion tokens.
@@ -589,19 +626,7 @@ func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 
 					modelAlias, snapshot := splitModelSnapshot(respModel)
 					promptTokens := dedupPromptTokens(finalPrompt, finalCached)
-					rq := db.Request{
-						ID:                    respID,
-						ApiKeyID:              apiKeyID,
-						RequestType:           db.RequestTypeChatCompletion,
-						TokenCountPrompt:      intPointer(promptTokens),
-						TokenCountComplete:    intPointer(finalCompletion),
-						InputTokenCount:       intPointer(finalPrompt),
-						CachedInputTokenCount: intPointer(finalCached),
-						OutputTokenCount:      intPointer(finalCompletion),
-						Model:                 modelAlias,
-						SnapshotVersion:       snapshot,
-						IsApproximated:        estimatedUsed,
-					}
+					rq := buildRequestRecord(apiKeyID, respID, modelAlias, snapshot, promptTokens, finalCompletion, finalPrompt, finalCached, finalCacheWrite, estimatedUsed)
 					if err := rc.db.WriteRequest(&rq); err != nil {
 						log.Printf("DEV LOG: failed to write request for SSE completed id=%s: %v", respID, err)
 					} else {
@@ -708,6 +733,7 @@ func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 		finalPrompt := cumPrompt
 		finalCompletion := cumCompletion
 		finalCached := cumCached
+		finalCacheWrite := cumCacheWrite
 		estimated := false
 
 		estimatedChars := accumulatedText.Len() + oversizedEventChars
@@ -721,19 +747,7 @@ func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 
 		modelAlias, snapshot := splitModelSnapshot(lastModel)
 		promptTokens := dedupPromptTokens(finalPrompt, finalCached)
-		rq := db.Request{
-			ID:                    lastID,
-			ApiKeyID:              apiKeyID,
-			RequestType:           db.RequestTypeChatCompletion,
-			TokenCountPrompt:      intPointer(promptTokens),
-			TokenCountComplete:    intPointer(finalCompletion),
-			InputTokenCount:       intPointer(finalPrompt),
-			CachedInputTokenCount: intPointer(finalCached),
-			OutputTokenCount:      intPointer(finalCompletion),
-			Model:                 modelAlias,
-			SnapshotVersion:       snapshot,
-			IsApproximated:        estimated,
-		}
+		rq := buildRequestRecord(apiKeyID, lastID, modelAlias, snapshot, promptTokens, finalCompletion, finalPrompt, finalCached, finalCacheWrite, estimated)
 		if err := rc.db.WriteRequest(&rq); err == nil {
 			if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
 				log.Printf("DEV LOG: wrote SSE request (fallback at end of stream) id=%s prompt=%d completion=%d", lastID, finalPrompt, finalCompletion)

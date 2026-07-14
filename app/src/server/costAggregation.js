@@ -21,6 +21,7 @@ const COST_SCALE_NUMBER = Number(COST_SCALE);
  *   currency: string | null;
  *   inputCost: CostPartResolution;
  *   cachedCost: CostPartResolution;
+ *   cacheWriteCost: CostPartResolution;
  *   outputCost: CostPartResolution;
  *   searchCost?: CostPartResolution;
  * }} BreakdownCostResolution
@@ -42,6 +43,7 @@ const COST_SCALE_NUMBER = Number(COST_SCALE);
  *   currency: string | null;
  *   inputCostScaled: bigint;
  *   cachedCostScaled: bigint;
+ *   cacheWriteCostScaled: bigint;
  *   outputCostScaled: bigint;
  *   searchCostScaled: bigint;
  *   currencyTotals: Map<string, bigint>;
@@ -207,6 +209,7 @@ export function createBreakdownCostAggregate() {
 		currency: null,
 		inputCostScaled: 0n,
 		cachedCostScaled: 0n,
+		cacheWriteCostScaled: 0n,
 		outputCostScaled: 0n,
 		searchCostScaled: 0n,
 		currencyTotals: createCurrencyTotals(),
@@ -226,12 +229,14 @@ export function addResolvedBreakdownCost(aggregate, resolved) {
 
 	aggregate.inputCostScaled += scaleCost(resolved.inputCost.cost);
 	aggregate.cachedCostScaled += scaleCost(resolved.cachedCost.cost);
+	aggregate.cacheWriteCostScaled += scaleCost(resolved.cacheWriteCost.cost);
 	aggregate.outputCostScaled += scaleCost(resolved.outputCost.cost);
 	addCurrencyTotal(
 		aggregate.currencyTotals,
 		resolved.currency,
 		resolved.inputCost.cost +
 			resolved.cachedCost.cost +
+			resolved.cacheWriteCost.cost +
 			resolved.outputCost.cost +
 			(resolved.searchCost?.cost ?? 0),
 	);
@@ -256,6 +261,7 @@ export function presentBreakdownCost(aggregate) {
 			missing: true,
 			inputCost: null,
 			cachedCost: null,
+			cacheWriteCost: null,
 			outputCost: null,
 			searchCost: null,
 			totalCost: null,
@@ -268,6 +274,7 @@ export function presentBreakdownCost(aggregate) {
 
 	const inputCost = scaledCostToNumber(aggregate.inputCostScaled);
 	const cachedCost = scaledCostToNumber(aggregate.cachedCostScaled);
+	const cacheWriteCost = scaledCostToNumber(aggregate.cacheWriteCostScaled);
 	const outputCost = scaledCostToNumber(aggregate.outputCostScaled);
 	const searchCost = scaledCostToNumber(aggregate.searchCostScaled);
 
@@ -277,11 +284,12 @@ export function presentBreakdownCost(aggregate) {
 		currencyTotals: presentCurrencyTotals(aggregate.currencyTotals),
 		inputCost,
 		cachedCost,
+		cacheWriteCost,
 		outputCost,
 		searchCost,
 		totalCost: aggregate.currencyIssue
 			? null
-			: inputCost + cachedCost + outputCost + searchCost,
+			: inputCost + cachedCost + cacheWriteCost + outputCost + searchCost,
 		currency: aggregate.currencyIssue ? null : aggregate.currency,
 	};
 }

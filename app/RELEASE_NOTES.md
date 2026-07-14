@@ -4,6 +4,9 @@
 - Added separate chat-token and rerank-search reporting and dashboard charts.
 - Added request-type-aware rerank pricing management and filters.
 
+## 1.0.1 - 2026-07-15
+- Added provider-reported GPT-5.6 cache-write accounting across pricing, reporting, and usage views.
+
 ## 1.0.0 - 2026-03-05
 - OpenAI-compatible API proxy for forwarding requests.
 - Web UI for creating, managing, and deactivating API keys.

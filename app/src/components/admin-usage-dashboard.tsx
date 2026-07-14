@@ -49,6 +49,7 @@ type UsageUser = {
 	name: string;
 	inputTokens: number;
 	cachedTokens: number;
+	cacheWriteTokens: number;
 	outputTokens: number;
 	searchUnits: number;
 	lastActivity: string | null;
@@ -162,6 +163,12 @@ export function AdminUsageDashboard({
 			{
 				accessorKey: "cachedTokens",
 				header: "Cache-Tokens",
+				cell: ({ getValue }) => numberFormatter.format(getValue<number>()),
+				sortingFn: "basic",
+			},
+			{
+				accessorKey: "cacheWriteTokens",
+				header: "Cache-Write-Tokens",
 				cell: ({ getValue }) => numberFormatter.format(getValue<number>()),
 				sortingFn: "basic",
 			},
@@ -388,7 +395,7 @@ export function AdminUsageDashboard({
 									<TableRow>
 										<TableCell
 											className="py-4 text-center text-muted-foreground"
-											colSpan={5}
+											colSpan={6}
 										>
 											Keine Benutzer gefunden.
 										</TableCell>

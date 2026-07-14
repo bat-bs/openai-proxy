@@ -63,12 +63,16 @@ export const apiKeyRouter = createTRPCRouter({
 				model: requests.model,
 				requestType: requests.requestType,
 				inputTokens:
-					sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
+					sql<number>`greatest(coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount} - ${requests.cacheWriteTokenCount}), 0), 0)`.as(
 						"inputTokens",
 					),
 				cachedInputTokens:
 					sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
 						"cachedInputTokens",
+					),
+				cacheWriteTokens:
+					sql<number>`coalesce(sum(${requests.cacheWriteTokenCount}), 0)`.as(
+						"cacheWriteTokens",
 					),
 				outputTokens:
 					sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
@@ -139,6 +143,7 @@ export const apiKeyRouter = createTRPCRouter({
 				requestTime: requests.requestTime,
 				inputTokenCount: requests.inputTokenCount,
 				cachedInputTokenCount: requests.cachedInputTokenCount,
+				cacheWriteTokenCount: requests.cacheWriteTokenCount,
 				outputTokenCount: requests.outputTokenCount,
 				requestType: requests.requestType,
 				searchUnits: requests.searchUnits,
@@ -155,10 +160,15 @@ export const apiKeyRouter = createTRPCRouter({
 
 			const inputTokenCount = Number(row.inputTokenCount ?? 0);
 			const cachedInputTokenCount = Number(row.cachedInputTokenCount ?? 0);
+			const cacheWriteTokens = Number(row.cacheWriteTokenCount ?? 0);
 			const outputTokenCount = Number(row.outputTokenCount ?? 0);
 			const searchUnits = Number(row.searchUnits ?? 0);
 
-			if (inputTokenCount + outputTokenCount + searchUnits <= 0) continue;
+			if (
+				inputTokenCount + outputTokenCount + searchUnits + cacheWriteTokens <=
+				0
+			)
+				continue;
 
 			const resolved =
 				row.requestType === "RERANK"
@@ -179,6 +189,7 @@ export const apiKeyRouter = createTRPCRouter({
 							requestTime: new Date(row.requestTime),
 							inputTokenCount,
 							cachedInputTokenCount,
+							cacheWriteTokenCount: cacheWriteTokens,
 							outputTokenCount,
 						});
 
@@ -194,6 +205,7 @@ export const apiKeyRouter = createTRPCRouter({
 			requestType: string;
 			inputTokens: number;
 			cachedInputTokens: number;
+			cacheWriteTokens: number;
 			outputTokens: number;
 			searchUnits: number;
 			cost: number | null;
@@ -206,6 +218,7 @@ export const apiKeyRouter = createTRPCRouter({
 			deactivated: boolean;
 			inputTokens: number;
 			cachedInputTokens: number;
+			cacheWriteTokens: number;
 			outputTokens: number;
 			searchUnits: number;
 			createdAt: string | null;
@@ -226,6 +239,7 @@ export const apiKeyRouter = createTRPCRouter({
 				deactivated: row.deactivated,
 				inputTokens: 0,
 				cachedInputTokens: 0,
+				cacheWriteTokens: 0,
 				outputTokens: 0,
 				searchUnits: 0,
 				createdAt: row.createdAt ?? null,
@@ -239,18 +253,27 @@ export const apiKeyRouter = createTRPCRouter({
 
 			const inputTokens = Number(row.inputTokens ?? 0);
 			const cachedInputTokens = Number(row.cachedInputTokens ?? 0);
+			const cacheWriteTokens = Number(row.cacheWriteTokens ?? 0);
 			const outputTokens = Number(row.outputTokens ?? 0);
 			const searchUnits = Number(row.searchUnits ?? 0);
 
 			entry.inputTokens += inputTokens;
 			entry.cachedInputTokens += cachedInputTokens;
+			entry.cacheWriteTokens += cacheWriteTokens;
 			entry.outputTokens += outputTokens;
 			entry.searchUnits += searchUnits;
 			if (!entry.createdAt) entry.createdAt = row.createdAt ?? null;
 
 			const model = row.model ?? "Unknown";
 			const requestType = row.requestType ?? "CHAT_COMPLETION";
-			if (inputTokens + cachedInputTokens + outputTokens + searchUnits > 0) {
+			if (
+				inputTokens +
+					cachedInputTokens +
+					cacheWriteTokens +
+					outputTokens +
+					searchUnits >
+				0
+			) {
 				const aggKey = `${id}::${model}::${requestType}`;
 				const modelCostPresentation = presentTotalCost(
 					costAggByKeyModel.get(aggKey),
@@ -268,6 +291,7 @@ export const apiKeyRouter = createTRPCRouter({
 					requestType,
 					inputTokens,
 					cachedInputTokens,
+					cacheWriteTokens,
 					outputTokens,
 					searchUnits,
 					cost: modelCostPresentation.cost,
@@ -302,6 +326,7 @@ export const apiKeyRouter = createTRPCRouter({
 			deactivated: row.deactivated,
 			inputTokens: row.inputTokens,
 			cachedInputTokens: row.cachedInputTokens,
+			cacheWriteTokens: row.cacheWriteTokens,
 			outputTokens: row.outputTokens,
 			searchUnits: row.searchUnits,
 			createdAt: row.createdAt ?? null,

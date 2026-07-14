@@ -24,7 +24,7 @@ func TestNewResponse_SSENestedUsage(t *testing.T) {
 		"data: {\"type\":\"response.in_progress\",\"sequence_number\":1,\"response\":{\"id\":\"r1\",\"status\":\"in_progress\"}}\n\n",
 		// final completed event contains nested usage
 		"event: response.completed\n",
-		`data: {"type":"response.completed","sequence_number":2,"response":{"id":"r1","object":"response","usage":{"prompt_tokens":11,"completion_tokens":22}}}` + "\n\n",
+		`data: {"type":"response.completed","sequence_number":2,"response":{"id":"r1","object":"response","usage":{"prompt_tokens":11,"completion_tokens":22,"prompt_tokens_details":{"cached_tokens":5,"cache_write_tokens":7}}}}` + "\n\n",
 	}
 	sse := strings.Join(sseEvents, "")
 
@@ -84,7 +84,7 @@ func TestNewResponse_SSENestedUsage(t *testing.T) {
 		t.Fatalf("expected 1 DB write, got %d; logs:\n%s", len(fb.writes), out)
 	}
 	w := fb.writes[0]
-	if w.ID != "r1" || intValue(w.TokenCountPrompt) != 11 || intValue(w.TokenCountComplete) != 22 {
+	if w.ID != "r1" || intValue(w.TokenCountPrompt) != 6 || intValue(w.TokenCountComplete) != 22 || intValue(w.CachedInputTokenCount) != 5 || w.CacheWriteTokenCount != 7 {
 		t.Fatalf("unexpected DB write: %+v; logs:\n%s", w, out)
 	}
 }
@@ -208,7 +208,8 @@ func TestNewResponse_ChatCompletionStoresInputTokens(t *testing.T) {
 			"prompt_tokens":23,
 			"prompt_tokens_details":{
 				"audio_tokens":0,
-				"cached_tokens":0
+				"cached_tokens":0,
+				"cache_write_tokens":12
 			},
 			"total_tokens":223
 		}
@@ -245,6 +246,9 @@ func TestNewResponse_ChatCompletionStoresInputTokens(t *testing.T) {
 	}
 	if intValue(w.OutputTokenCount) != 200 {
 		t.Fatalf("expected output tokens 200, got %d", intValue(w.OutputTokenCount))
+	}
+	if w.CacheWriteTokenCount != 12 {
+		t.Fatalf("expected cache-write tokens 12, got %d", w.CacheWriteTokenCount)
 	}
 }
 

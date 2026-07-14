@@ -71,153 +71,159 @@ export function ApiKeysClient() {
 					Schlüssel werden geladen...
 				</div>
 			) : (
-				<ApiKeysTable
-					action={
-						<div className="flex flex-wrap items-center gap-3">
-							<label className="flex items-center gap-2 text-sm">
-								<input
-									checked={showDeactivated}
-									className="h-4 w-4 rounded border-border"
-									onChange={(event) => setShowDeactivated(event.target.checked)}
-									type="checkbox"
-								/>
-								<span>Deaktivierte anzeigen</span>
-							</label>
-							<Dialog
-								onOpenChange={(open) => {
-									setDialogOpen(open);
-									if (!open) {
-										setToken(null);
-										setCreatedId(null);
-										setDescription("");
-										setCopied(false);
-										createApiKey.reset();
-									}
-								}}
-								open={dialogOpen}
-							>
-								<DialogTrigger render={<Button />}>
-									API-Key erstellen
-								</DialogTrigger>
-								<DialogContent>
-									<DialogHeader>
-										<DialogTitle>Neuer API-Key</DialogTitle>
-										<DialogDescription>
-											Füge optional eine Beschreibung hinzu und erstelle den
-											Schlüssel.
-										</DialogDescription>
-									</DialogHeader>
-									<div className="grid gap-3">
-										<Input
-											onChange={(event) => setDescription(event.target.value)}
-											placeholder="Beschreibung (optional)"
-											value={description}
-										/>
-										{token ? (
-											<div className="space-y-2 rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-yellow-900">
-												<div className="font-semibold text-xs uppercase tracking-wide">
-													Warnung
+				<div className="space-y-3">
+					<ApiKeysTable
+						action={
+							<div className="flex flex-wrap items-center gap-3">
+								<label className="flex items-center gap-2 text-sm">
+									<input
+										checked={showDeactivated}
+										className="h-4 w-4 rounded border-border"
+										onChange={(event) =>
+											setShowDeactivated(event.target.checked)
+										}
+										type="checkbox"
+									/>
+									<span>Deaktivierte anzeigen</span>
+								</label>
+								<Dialog
+									onOpenChange={(open) => {
+										setDialogOpen(open);
+										if (!open) {
+											setToken(null);
+											setCreatedId(null);
+											setDescription("");
+											setCopied(false);
+											createApiKey.reset();
+										}
+									}}
+									open={dialogOpen}
+								>
+									<DialogTrigger render={<Button />}>
+										API-Key erstellen
+									</DialogTrigger>
+									<DialogContent>
+										<DialogHeader>
+											<DialogTitle>Neuer API-Key</DialogTitle>
+											<DialogDescription>
+												Füge optional eine Beschreibung hinzu und erstelle den
+												Schlüssel.
+											</DialogDescription>
+										</DialogHeader>
+										<div className="grid gap-3">
+											<Input
+												onChange={(event) => setDescription(event.target.value)}
+												placeholder="Beschreibung (optional)"
+												value={description}
+											/>
+											{token ? (
+												<div className="space-y-2 rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-yellow-900">
+													<div className="font-semibold text-xs uppercase tracking-wide">
+														Warnung
+													</div>
+													<p className="text-sm">
+														Dieser Schlüssel wird nur einmal angezeigt. Bitte
+														jetzt sicher speichern.
+													</p>
+													<div className="grid gap-2">
+														<Input readOnly value={token} />
+														{createdId ? (
+															<span className="self-center text-muted-foreground text-xs">
+																ID: {createdId}
+															</span>
+														) : null}
+													</div>
+													<div className="flex items-center gap-2">
+														<Button
+															onClick={async () => {
+																try {
+																	await navigator.clipboard.writeText(token);
+																	setCopied(true);
+																	setTimeout(() => setCopied(false), 1500);
+																} catch {
+																	setCopied(false);
+																}
+															}}
+															size="sm"
+															type="button"
+															variant="outline"
+														>
+															Token kopieren
+														</Button>
+														{copied ? (
+															<span className="text-muted-foreground text-xs">
+																Kopiert.
+															</span>
+														) : null}
+													</div>
 												</div>
-												<p className="text-sm">
-													Dieser Schlüssel wird nur einmal angezeigt. Bitte
-													jetzt sicher speichern.
-												</p>
-												<div className="grid gap-2">
-													<Input readOnly value={token} />
-													{createdId ? (
-														<span className="self-center text-muted-foreground text-xs">
-															ID: {createdId}
-														</span>
-													) : null}
-												</div>
-												<div className="flex items-center gap-2">
-													<Button
-														onClick={async () => {
-															try {
-																await navigator.clipboard.writeText(token);
-																setCopied(true);
-																setTimeout(() => setCopied(false), 1500);
-															} catch {
-																setCopied(false);
-															}
-														}}
-														size="sm"
-														type="button"
-														variant="outline"
-													>
-														Token kopieren
-													</Button>
-													{copied ? (
-														<span className="text-muted-foreground text-xs">
-															Kopiert.
-														</span>
-													) : null}
-												</div>
-											</div>
-										) : null}
-									</div>
-									<DialogFooter showCloseButton>
-										<div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-											{token ? null : (
-												<Button
-													disabled={createApiKey.isPending}
-													onClick={() =>
-														createApiKey.mutate({
-															description: description.trim() || undefined,
-														})
-													}
-												>
-													{createApiKey.isPending
-														? "Wird erstellt..."
-														: "Schlüssel erstellen"}
-												</Button>
-											)}
-											{createApiKey.error ? (
-												<span className="text-destructive text-xs">
-													Schlüssel konnte nicht erstellt werden. Bitte erneut
-													versuchen.
-												</span>
 											) : null}
 										</div>
-									</DialogFooter>
-								</DialogContent>
-							</Dialog>
-						</div>
-					}
-					data={visibleData.map((row) => ({
-						kind: "key",
-						id: row.id,
-						description: row.description,
-						deactivated: row.deactivated,
-						inputTokens: row.inputTokens,
-						cachedInputTokens: row.cachedInputTokens,
-						outputTokens: row.outputTokens,
-						searchUnits: row.searchUnits,
-						createdAt: row.createdAt,
-						cost: row.cost ?? null,
-						currency: row.currency ?? null,
-						currencyIssue: row.currencyIssue,
-						currencyTotals: row.currencyTotals,
-						subRows: row.models.map((modelRow) => ({
-							kind: "model",
-							model: modelRow.model,
-							inputTokens: modelRow.inputTokens,
-							cachedInputTokens: modelRow.cachedInputTokens,
-							outputTokens: modelRow.outputTokens,
-							searchUnits: modelRow.searchUnits,
-							requestType: modelRow.requestType,
-							cost: modelRow.cost ?? null,
-							currency: modelRow.currency ?? null,
-							currencyTotals: modelRow.currencyTotals,
-						})),
-					}))}
-					deactivatingId={deactivatingId}
-					onRequestDeactivate={({ id, label }) => {
-						if (deactivateApiKey.isPending) return;
-						setConfirmPayload({ id, label });
-						setConfirmDialogOpen(true);
-					}}
-				/>
+										<DialogFooter showCloseButton>
+											<div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+												{token ? null : (
+													<Button
+														disabled={createApiKey.isPending}
+														onClick={() =>
+															createApiKey.mutate({
+																description: description.trim() || undefined,
+															})
+														}
+													>
+														{createApiKey.isPending
+															? "Wird erstellt..."
+															: "Schlüssel erstellen"}
+													</Button>
+												)}
+												{createApiKey.error ? (
+													<span className="text-destructive text-xs">
+														Schlüssel konnte nicht erstellt werden. Bitte erneut
+														versuchen.
+													</span>
+												) : null}
+											</div>
+										</DialogFooter>
+									</DialogContent>
+								</Dialog>
+							</div>
+						}
+						data={visibleData.map((row) => ({
+							kind: "key",
+							id: row.id,
+							description: row.description,
+							deactivated: row.deactivated,
+							inputTokens: row.inputTokens,
+							cachedInputTokens: row.cachedInputTokens,
+							cacheWriteTokens: row.cacheWriteTokens,
+							outputTokens: row.outputTokens,
+							searchUnits: row.searchUnits,
+							createdAt: row.createdAt,
+							cost: row.cost ?? null,
+							currency: row.currency ?? null,
+							currencyIssue: row.currencyIssue,
+							currencyTotals: row.currencyTotals,
+							subRows: row.models.map((modelRow) => ({
+								kind: "model",
+								model: modelRow.model,
+								inputTokens: modelRow.inputTokens,
+								cachedInputTokens: modelRow.cachedInputTokens,
+								cacheWriteTokens: modelRow.cacheWriteTokens,
+								outputTokens: modelRow.outputTokens,
+								searchUnits: modelRow.searchUnits,
+								requestType: modelRow.requestType,
+								cost: modelRow.cost ?? null,
+								currency: modelRow.currency ?? null,
+								currencyTotals: modelRow.currencyTotals,
+							})),
+						}))}
+						deactivatingId={deactivatingId}
+						onRequestDeactivate={({ id, label }) => {
+							if (deactivateApiKey.isPending) return;
+							setConfirmPayload({ id, label });
+							setConfirmDialogOpen(true);
+						}}
+					/>
+				</div>
 			)}
 			<Dialog
 				onOpenChange={(open) => {

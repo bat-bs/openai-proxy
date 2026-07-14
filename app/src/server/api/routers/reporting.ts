@@ -414,12 +414,14 @@ export const reportingRouter = createTRPCRouter({
 						summary: {
 							inputTokens: 0,
 							cachedInputTokens: 0,
+							cacheWriteTokens: 0,
 							outputTokens: 0,
 							searchUnits: 0,
 							totalCost: 0,
 							currency: "EUR",
 							currencyTotals: [],
 							currencyIssue: false,
+							hasMissingCosts: false,
 						},
 						modelUsage: [],
 						users: [],
@@ -441,12 +443,16 @@ export const reportingRouter = createTRPCRouter({
 					model: requests.model,
 					requestType: requests.requestType,
 					inputTokens:
-						sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
+						sql<number>`greatest(coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount} - ${requests.cacheWriteTokenCount}), 0), 0)`.as(
 							"inputTokens",
 						),
 					cachedInputTokens:
 						sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
 							"cachedInputTokens",
+						),
+					cacheWriteTokens:
+						sql<number>`coalesce(sum(${requests.cacheWriteTokenCount}), 0)`.as(
+							"cacheWriteTokens",
 						),
 					outputTokens:
 						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
@@ -528,7 +534,7 @@ export const reportingRouter = createTRPCRouter({
 			>();
 
 			const registerUsedCost = (
-				tokenType: "input" | "cached" | "output",
+				tokenType: "input" | "cached" | "cache_write" | "output",
 				usedCost: CostStageRow,
 			) => {
 				const stageMin = usedCost.stageMinTokens;
@@ -594,6 +600,7 @@ export const reportingRouter = createTRPCRouter({
 					requestTime: requests.requestTime,
 					inputTokenCount: requests.inputTokenCount,
 					cachedInputTokenCount: requests.cachedInputTokenCount,
+					cacheWriteTokenCount: requests.cacheWriteTokenCount,
 					outputTokenCount: requests.outputTokenCount,
 					requestType: requests.requestType,
 					searchUnits: requests.searchUnits,
@@ -612,11 +619,20 @@ export const reportingRouter = createTRPCRouter({
 
 				const inputTokenCount = Number(row.inputTokenCount ?? 0);
 				const cachedInputTokenCount = Number(row.cachedInputTokenCount ?? 0);
+				const cacheWriteTokens = Number(row.cacheWriteTokenCount ?? 0);
 				const outputTokenCount = Number(row.outputTokenCount ?? 0);
 				const searchUnits = Number(row.searchUnits ?? 0);
 
 				// Keep output stable: ignore requests that contain no billed tokens.
-				if (inputTokenCount + outputTokenCount + searchUnits <= 0) continue;
+				if (
+					inputTokenCount +
+						cachedInputTokenCount +
+						cacheWriteTokens +
+						outputTokenCount +
+						searchUnits <=
+					0
+				)
+					continue;
 
 				const bucketValue = row.bucket;
 				if (!bucketValue) continue;
@@ -637,6 +653,7 @@ export const reportingRouter = createTRPCRouter({
 									missing: rerank.missing,
 									inputCost: { cost: 0, usedCost: null },
 									cachedCost: { cost: 0, usedCost: null },
+									cacheWriteCost: { cost: 0, usedCost: null },
 									outputCost: { cost: 0, usedCost: null },
 									searchCost: { cost: rerank.cost, usedCost: rerank.usedCost },
 								};
@@ -647,6 +664,7 @@ export const reportingRouter = createTRPCRouter({
 									requestTime: new Date(row.requestTime),
 									inputTokenCount,
 									cachedInputTokenCount,
+									cacheWriteTokenCount: cacheWriteTokens,
 									outputTokenCount,
 								});
 								return {
@@ -667,6 +685,9 @@ export const reportingRouter = createTRPCRouter({
 					}
 					if (resolved.cachedCost.usedCost) {
 						registerUsedCost("cached", resolved.cachedCost.usedCost);
+					}
+					if (resolved.cacheWriteCost.usedCost) {
+						registerUsedCost("cache_write", resolved.cacheWriteCost.usedCost);
 					}
 					if (resolved.outputCost.usedCost) {
 						registerUsedCost("output", resolved.outputCost.usedCost);
@@ -799,10 +820,12 @@ export const reportingRouter = createTRPCRouter({
 				requestType: string;
 				inputTokens: number;
 				cachedInputTokens: number;
+				cacheWriteTokens: number;
 				outputTokens: number;
 				searchUnits: number;
 				inputCost: number | null;
 				cachedCost: number | null;
+				cacheWriteCost: number | null;
 				outputCost: number | null;
 				searchCost: number | null;
 				totalCost: number | null;
@@ -815,6 +838,7 @@ export const reportingRouter = createTRPCRouter({
 				name: string;
 				inputTokens: number;
 				cachedInputTokens: number;
+				cacheWriteTokens: number;
 				outputTokens: number;
 				searchUnits: number;
 				totalCostScaled: bigint;
@@ -838,6 +862,7 @@ export const reportingRouter = createTRPCRouter({
 			>();
 			let totalInputTokens = 0;
 			let totalCachedTokens = 0;
+			let totalCacheWriteTokens = 0;
 			let totalOutputTokens = 0;
 			let totalSearchUnits = 0;
 			let totalCostScaled = 0n;
@@ -853,6 +878,7 @@ export const reportingRouter = createTRPCRouter({
 					name: row.name ?? id,
 					inputTokens: 0,
 					cachedInputTokens: 0,
+					cacheWriteTokens: 0,
 					outputTokens: 0,
 					searchUnits: 0,
 					totalCostScaled: 0n,
@@ -866,23 +892,31 @@ export const reportingRouter = createTRPCRouter({
 
 				const inputTokens = Number(row.inputTokens ?? 0);
 				const cachedTokens = Number(row.cachedInputTokens ?? 0);
+				const cacheWriteTokens = Number(row.cacheWriteTokens ?? 0);
 				const outputTokens = Number(row.outputTokens ?? 0);
 				const searchUnits = Number(row.searchUnits ?? 0);
 
 				entry.inputTokens += inputTokens;
 				entry.cachedInputTokens += cachedTokens;
+				entry.cacheWriteTokens += cacheWriteTokens;
 				entry.outputTokens += outputTokens;
 				entry.searchUnits += searchUnits;
 
 				totalInputTokens += inputTokens;
 				totalCachedTokens += cachedTokens;
+				totalCacheWriteTokens += cacheWriteTokens;
 				totalOutputTokens += outputTokens;
 				totalSearchUnits += searchUnits;
 
 				const model = row.model ?? null;
 				if (
 					model &&
-					inputTokens + cachedTokens + outputTokens + searchUnits > 0
+					inputTokens +
+						cachedTokens +
+						cacheWriteTokens +
+						outputTokens +
+						searchUnits >
+						0
 				) {
 					const userModelKey = `${id}::${model}::${row.requestType}`;
 					const agg = costAggByUserModel.get(userModelKey);
@@ -917,10 +951,12 @@ export const reportingRouter = createTRPCRouter({
 							requestType: row.requestType ?? "CHAT_COMPLETION",
 							inputTokens,
 							cachedInputTokens: cachedTokens,
+							cacheWriteTokens,
 							outputTokens,
 							searchUnits,
 							inputCost: null,
 							cachedCost: null,
+							cacheWriteCost: null,
 							outputCost: null,
 							searchCost: null,
 							totalCost: null,
@@ -936,10 +972,12 @@ export const reportingRouter = createTRPCRouter({
 							requestType: row.requestType ?? "CHAT_COMPLETION",
 							inputTokens,
 							cachedInputTokens: cachedTokens,
+							cacheWriteTokens,
 							outputTokens,
 							searchUnits,
 							inputCost: null,
 							cachedCost: null,
+							cacheWriteCost: null,
 							outputCost: null,
 							searchCost: null,
 							totalCost: null,
@@ -953,6 +991,7 @@ export const reportingRouter = createTRPCRouter({
 						const modelCostScaled =
 							agg.inputCostScaled +
 							agg.cachedCostScaled +
+							agg.cacheWriteCostScaled +
 							agg.outputCostScaled +
 							agg.searchCostScaled;
 						const modelCurrency = modelCostPresentation.currency;
@@ -962,10 +1001,12 @@ export const reportingRouter = createTRPCRouter({
 							requestType: row.requestType ?? "CHAT_COMPLETION",
 							inputTokens,
 							cachedInputTokens: cachedTokens,
+							cacheWriteTokens,
 							outputTokens,
 							searchUnits,
 							inputCost: modelCostPresentation.inputCost,
 							cachedCost: modelCostPresentation.cachedCost,
+							cacheWriteCost: modelCostPresentation.cacheWriteCost,
 							outputCost: modelCostPresentation.outputCost,
 							searchCost: modelCostPresentation.searchCost,
 							totalCost: modelCostPresentation.totalCost,
@@ -1003,6 +1044,7 @@ export const reportingRouter = createTRPCRouter({
 				name: user.name,
 				inputTokens: user.inputTokens,
 				cachedInputTokens: user.cachedInputTokens,
+				cacheWriteTokens: user.cacheWriteTokens,
 				outputTokens: user.outputTokens,
 				searchUnits: user.searchUnits,
 				totalCost:
@@ -1029,6 +1071,7 @@ export const reportingRouter = createTRPCRouter({
 				summary: {
 					inputTokens: totalInputTokens,
 					cachedInputTokens: totalCachedTokens,
+					cacheWriteTokens: totalCacheWriteTokens,
 					outputTokens: totalOutputTokens,
 					searchUnits: totalSearchUnits,
 					totalCost:

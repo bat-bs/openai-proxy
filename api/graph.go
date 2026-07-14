@@ -416,6 +416,7 @@ func (g *GraphHandler) getCostData(dbs db.RequestSummary) (totalCosts int, estim
 func computeCosts(costs []db.Costs, dbs db.RequestSummary) (totalCosts int, estimated bool) {
 	inputTokenCount := dbs.InputTokenCount
 	cachedInputTokenCount := dbs.CachedInputTokenCount
+	cacheWriteTokenCount := dbs.CacheWriteTokenCount
 	outputTokenCount := dbs.OutputTokenCount
 
 	// Legacy fallback: graph code historically used TokenCountPrompt/TokenCountComplete.
@@ -423,6 +424,7 @@ func computeCosts(costs []db.Costs, dbs db.RequestSummary) (totalCosts int, esti
 	if inputTokenCount == 0 && cachedInputTokenCount == 0 && outputTokenCount == 0 {
 		inputTokenCount = dbs.TokenCountPrompt
 		cachedInputTokenCount = 0
+		cacheWriteTokenCount = 0
 		outputTokenCount = dbs.TokenCountComplete
 	}
 
@@ -431,6 +433,7 @@ func computeCosts(costs []db.Costs, dbs db.RequestSummary) (totalCosts int, esti
 		RequestTime:           dbs.RequestTime,
 		InputTokenCount:       inputTokenCount,
 		CachedInputTokenCount: cachedInputTokenCount,
+		CacheWriteTokenCount:  cacheWriteTokenCount,
 		OutputTokenCount:      outputTokenCount,
 		StageType:             db.ContextLengthStageType,
 	})

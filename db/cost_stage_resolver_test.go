@@ -169,6 +169,38 @@ func TestResolveRequestCostStage_SingleStageModelResolvesAsOpenEnded(t *testing.
 	}
 }
 
+func TestResolveRequestCostStage_ExcludesCacheWritesFromOrdinaryInput(t *testing.T) {
+	validFrom := time.Date(2026, 3, 23, 0, 0, 0, 0, time.UTC)
+	requestTime := time.Date(2026, 3, 23, 15, 0, 0, 0, time.UTC)
+
+	costRows := []Costs{
+		{ModelName: "gpt-5.6", RetailPrice: 100, RequestTime: validFrom, TokenType: "input", UnitOfMeasure: "1K", Currency: "EUR", StageType: ContextLengthStageType, StageMinTokens: 0},
+		{ModelName: "gpt-5.6", RetailPrice: 10, RequestTime: validFrom, TokenType: "cached", UnitOfMeasure: "1K", Currency: "EUR", StageType: ContextLengthStageType, StageMinTokens: 0},
+		{ModelName: "gpt-5.6", RetailPrice: 125, RequestTime: validFrom, TokenType: "cache_write", UnitOfMeasure: "1K", Currency: "EUR", StageType: ContextLengthStageType, StageMinTokens: 0},
+		{ModelName: "gpt-5.6", RetailPrice: 200, RequestTime: validFrom, TokenType: "output", UnitOfMeasure: "1K", Currency: "EUR", StageType: ContextLengthStageType, StageMinTokens: 0},
+	}
+
+	res := ResolveRequestCostStage(costRows, RequestCostStageResolutionRequest{
+		Model:                 "gpt-5.6",
+		RequestTime:           requestTime,
+		InputTokenCount:       1_000,
+		CachedInputTokenCount: 200,
+		CacheWriteTokenCount:  300,
+		OutputTokenCount:      100,
+		StageType:             ContextLengthStageType,
+	})
+
+	if res.Missing {
+		t.Fatalf("expected cache-write pricing to resolve: %+v", res)
+	}
+	if res.InputCost.Cost != 0.5 {
+		t.Fatalf("expected 500 ordinary input tokens to cost 0.5, got %v", res.InputCost.Cost)
+	}
+	if res.CacheWriteCost.Cost != 0.375 {
+		t.Fatalf("expected 300 cache-write tokens to cost 0.375, got %v", res.CacheWriteCost.Cost)
+	}
+}
+
 func TestResolveRequestCostStage_MissingModelOrStage(t *testing.T) {
 	validFrom := time.Date(2026, 3, 23, 0, 0, 0, 0, time.UTC)
 	requestTime := time.Date(2026, 3, 23, 15, 0, 0, 0, time.UTC)

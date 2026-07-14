@@ -67,15 +67,18 @@ export const requests = pgTable(
 			withTimezone: true,
 			mode: "string",
 		}).defaultNow(),
-		model: varchar({ length: 255 }),
 		apiKeyId: varchar("api_key_id", { length: 255 }).notNull(),
 		requestType: requestType("request_type").notNull(),
 		inputTokenCount: integer("input_token_count"),
 		cachedInputTokenCount: integer("cached_input_token_count"),
 		outputTokenCount: integer("output_token_count"),
 		searchUnits: integer("search_units"),
+		model: varchar({ length: 255 }),
 		snapshotVersion: varchar("snapshot_version", { length: 255 }),
 		isApproximated: boolean("is_approximated").default(false).notNull(),
+		cacheWriteTokenCount: integer("cache_write_token_count")
+			.default(0)
+			.notNull(),
 	},
 	(table) => [
 		foreignKey({

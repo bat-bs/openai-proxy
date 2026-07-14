@@ -26,6 +26,7 @@ type ApiKey struct {
 	TokenCountComplete    *int
 	InputTokenCount       int
 	CachedInputTokenCount int
+	CacheWriteTokenCount  int
 	OutputTokenCount      int
 	CacheRatioPercent     float64
 }
@@ -127,6 +128,7 @@ type Request struct {
 	CachedInputTokenCount *int // Tokens already cached (subset of InputTokenCount)
 	OutputTokenCount      *int // Output tokens (should match TokenCountComplete)
 	SearchUnits           *int
+	CacheWriteTokenCount  int // Tokens written to cache, as reported by the API
 	Model                 string
 	SnapshotVersion       string
 	IsApproximated        bool // true if any usage count was estimated, not provided by API
@@ -146,13 +148,13 @@ func (d *Database) WriteRequest(r *Request) error {
 		INSERT INTO requests (
 			id, api_key_id,
 			request_type,
-			input_token_count, cached_input_token_count, output_token_count, search_units,
+			input_token_count, cached_input_token_count, cache_write_token_count, output_token_count, search_units,
 			model, snapshot_version, is_approximated
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 		r.ID, r.ApiKeyID,
 		r.RequestType,
-		r.InputTokenCount, r.CachedInputTokenCount, r.OutputTokenCount, r.SearchUnits,
+		r.InputTokenCount, r.CachedInputTokenCount, r.CacheWriteTokenCount, r.OutputTokenCount, r.SearchUnits,
 		r.Model, nullOrString(r.SnapshotVersion), r.IsApproximated,
 	)
 	return err
@@ -228,6 +230,7 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 			a.UUID, a.Owner, a.Description,
 			COALESCE(SUM(r.input_token_count), 0),
 			COALESCE(SUM(r.cached_input_token_count), 0),
+			COALESCE(SUM(r.cache_write_token_count), 0),
 			COALESCE(SUM(r.output_token_count), 0)
 		FROM apiKeys a
 		LEFT JOIN requests r ON a.UUID = r.api_key_id
@@ -239,14 +242,14 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 
 	for rows.Next() {
 		var a ApiKey
-		var inputTotal, cachedTotal, outputTotal int
+		var inputTotal, cachedTotal, cacheWriteTotal, outputTotal int
 		if err := rows.Scan(
 			&a.UUID, &a.Owner, &a.Description,
-			&inputTotal, &cachedTotal, &outputTotal,
+			&inputTotal, &cachedTotal, &cacheWriteTotal, &outputTotal,
 		); err != nil {
 			return apikeys, err
 		}
-		prompt := inputTotal - cachedTotal
+		prompt := inputTotal - cachedTotal - cacheWriteTotal
 		if prompt < 0 {
 			prompt = 0
 		}
@@ -254,6 +257,7 @@ func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
 		a.TokenCountPrompt = &promptValue
 		a.InputTokenCount = inputTotal
 		a.CachedInputTokenCount = cachedTotal
+		a.CacheWriteTokenCount = cacheWriteTotal
 		a.OutputTokenCount = outputTotal
 		outValue := outputTotal
 		a.TokenCountComplete = &outValue
@@ -435,6 +439,7 @@ type RequestSummary struct {
 	TokenCountComplete    int
 	InputTokenCount       int
 	CachedInputTokenCount int
+	CacheWriteTokenCount  int
 	OutputTokenCount      int
 	SearchUnits           int
 	RequestType           string
@@ -578,7 +583,9 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string,
 		SELECT
 			%[1]s,
 			r.model,
-			COALESCE(SUM(r.input_token_count), 0) - COALESCE(SUM(r.cached_input_token_count), 0),
+			COALESCE(SUM(r.input_token_count), 0),
+			COALESCE(SUM(r.cached_input_token_count), 0),
+			COALESCE(SUM(r.cache_write_token_count), 0),
 			COALESCE(SUM(r.output_token_count), 0),
 			COALESCE(SUM(r.search_units), 0),
 			r.request_type,
@@ -599,9 +606,14 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string,
 	var summary []RequestSummary
 	for rows.Next() {
 		var rq RequestSummary
-		if err := rows.Scan(&rq.ID, &rq.Model, &rq.TokenCountPrompt, &rq.TokenCountComplete, &rq.SearchUnits, &rq.RequestType, &rq.RequestTime); err != nil {
+		if err := rows.Scan(&rq.ID, &rq.Model, &rq.InputTokenCount, &rq.CachedInputTokenCount, &rq.CacheWriteTokenCount, &rq.OutputTokenCount, &rq.SearchUnits, &rq.RequestType, &rq.RequestTime); err != nil {
 			return summary, err
 		}
+		rq.TokenCountPrompt = rq.InputTokenCount - rq.CachedInputTokenCount - rq.CacheWriteTokenCount
+		if rq.TokenCountPrompt < 0 {
+			rq.TokenCountPrompt = 0
+		}
+		rq.TokenCountComplete = rq.OutputTokenCount
 		summary = append(summary, rq)
 	}
 	return summary, nil
@@ -649,6 +661,7 @@ func (d *Database) LookupApiKeyUserRequests(uid string, kind string, filter stri
 			r.model,
 			COALESCE(r.input_token_count, 0),
 			COALESCE(r.cached_input_token_count, 0),
+			COALESCE(r.cache_write_token_count, 0),
 			COALESCE(r.output_token_count, 0),
 			COALESCE(r.search_units, 0),
 			r.request_type,
@@ -676,6 +689,7 @@ func (d *Database) LookupApiKeyUserRequests(uid string, kind string, filter stri
 			&rq.Model,
 			&rq.InputTokenCount,
 			&rq.CachedInputTokenCount,
+			&rq.CacheWriteTokenCount,
 			&rq.OutputTokenCount,
 			&rq.SearchUnits,
 			&rq.RequestType,
@@ -685,7 +699,7 @@ func (d *Database) LookupApiKeyUserRequests(uid string, kind string, filter stri
 		}
 
 		// Keep legacy fields populated for any UI paths that still use prompt/output.
-		rq.TokenCountPrompt = rq.InputTokenCount - rq.CachedInputTokenCount
+		rq.TokenCountPrompt = rq.InputTokenCount - rq.CachedInputTokenCount - rq.CacheWriteTokenCount
 		if rq.TokenCountPrompt < 0 {
 			rq.TokenCountPrompt = 0
 		}
@@ -705,6 +719,7 @@ func (d *Database) LookupApiKeyUserOverview() ([]RequestSummary, error) {
 				u.id,
 				COALESCE(SUM(r.input_token_count), 0),
 				COALESCE(SUM(r.cached_input_token_count), 0),
+				COALESCE(SUM(r.cache_write_token_count), 0),
 				COALESCE(SUM(r.output_token_count), 0)
 				,COALESCE(SUM(r.search_units), 0)
 			FROM apiKeys a
@@ -721,12 +736,13 @@ func (d *Database) LookupApiKeyUserOverview() ([]RequestSummary, error) {
 
 	for rows.Next() {
 		var rq RequestSummary
-		var inputTotal, cachedTotal, outputTotal sql.NullInt64
-		if err := rows.Scan(&rq.Name, &rq.ID, &inputTotal, &cachedTotal, &outputTotal, &rq.SearchUnits); err != nil {
+		var inputTotal, cachedTotal, cacheWriteTotal, outputTotal sql.NullInt64
+		if err := rows.Scan(&rq.Name, &rq.ID, &inputTotal, &cachedTotal, &cacheWriteTotal, &outputTotal, &rq.SearchUnits); err != nil {
 			return summary, err
 		}
 		in := int(inputTotal.Int64)
 		cached := int(cachedTotal.Int64)
+		cacheWrite := int(cacheWriteTotal.Int64)
 		out := int(outputTotal.Int64)
 		if in < 0 {
 			in = 0
@@ -734,16 +750,20 @@ func (d *Database) LookupApiKeyUserOverview() ([]RequestSummary, error) {
 		if cached < 0 {
 			cached = 0
 		}
+		if cacheWrite < 0 {
+			cacheWrite = 0
+		}
 		if out < 0 {
 			out = 0
 		}
 		rq.InputTokenCount = in
 		rq.CachedInputTokenCount = cached
+		rq.CacheWriteTokenCount = cacheWrite
 		rq.OutputTokenCount = out
 		if in > 0 {
 			rq.CacheRatioPercent = (float64(cached) / float64(in)) * 100
 		}
-		rq.TokenCountPrompt = in - cached
+		rq.TokenCountPrompt = in - cached - cacheWrite
 		if rq.TokenCountPrompt < 0 {
 			rq.TokenCountPrompt = 0
 		}

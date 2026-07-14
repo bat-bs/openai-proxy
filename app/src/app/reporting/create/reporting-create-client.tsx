@@ -55,6 +55,7 @@ type SortKey =
 	| "name"
 	| "inputTokens"
 	| "cachedInputTokens"
+	| "cacheWriteTokens"
 	| "outputTokens"
 	| "searchUnits"
 	| "totalCost";
@@ -232,6 +233,8 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 					return direction * (a.inputTokens - b.inputTokens);
 				case "cachedInputTokens":
 					return direction * (a.cachedInputTokens - b.cachedInputTokens);
+				case "cacheWriteTokens":
+					return direction * (a.cacheWriteTokens - b.cacheWriteTokens);
 				case "outputTokens":
 					return direction * (a.outputTokens - b.outputTokens);
 				case "searchUnits":
@@ -520,6 +523,12 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 								<span className="text-muted-foreground">Cache:</span>{" "}
 								<span className="font-semibold">
 									{numberFormatter.format(summary?.cachedInputTokens ?? 0)}
+								</span>
+							</div>
+							<div>
+								<span className="text-muted-foreground">Cache Write:</span>{" "}
+								<span className="font-semibold">
+									{numberFormatter.format(summary?.cacheWriteTokens ?? 0)}
 								</span>
 							</div>
 							<div>
@@ -828,6 +837,18 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 								<TableHead className="pr-3 pb-2 font-medium">
 									<SortButton
 										active={
+											sorting?.id === "cacheWriteTokens"
+												? sorting.direction
+												: null
+										}
+										onClick={() => toggleSorting("cacheWriteTokens")}
+									>
+										Cache-Write-Tokens
+									</SortButton>
+								</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">
+									<SortButton
+										active={
 											sorting?.id === "outputTokens" ? sorting.direction : null
 										}
 										onClick={() => toggleSorting("outputTokens")}
@@ -880,6 +901,9 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 											{numberFormatter.format(user.cachedInputTokens)}
 										</TableCell>
 										<TableCell className="py-2 pr-3">
+											{numberFormatter.format(user.cacheWriteTokens)}
+										</TableCell>
+										<TableCell className="py-2 pr-3">
 											{numberFormatter.format(user.outputTokens)}
 										</TableCell>
 										<TableCell className="py-2 pr-3">
@@ -909,6 +933,10 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 													<TableCell className="py-1.5 pr-3">
 														{numberFormatter.format(model.cachedInputTokens)} (
 														{formatCost(model.cachedCost, model.currency)})
+													</TableCell>
+													<TableCell className="py-1.5 pr-3">
+														{numberFormatter.format(model.cacheWriteTokens)} (
+														{formatCost(model.cacheWriteCost, model.currency)})
 													</TableCell>
 													<TableCell className="py-1.5 pr-3">
 														{numberFormatter.format(model.outputTokens)} (

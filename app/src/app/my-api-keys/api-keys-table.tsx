@@ -38,6 +38,7 @@ export type ApiKeyTableRow = {
 	deactivated?: boolean;
 	inputTokens: number;
 	cachedInputTokens: number;
+	cacheWriteTokens: number;
 	outputTokens: number;
 	searchUnits?: number;
 	requestType?: string;
@@ -162,6 +163,12 @@ export function ApiKeysTable({
 				sortingFn: "basic",
 			},
 			{
+				accessorKey: "cacheWriteTokens",
+				header: "Cache-Write-Tokens",
+				cell: ({ getValue }) => formatNumber(getValue<number>()),
+				sortingFn: "basic",
+			},
+			{
 				accessorKey: "outputTokens",
 				header: "Verwendete Output-Tokens",
 				cell: ({ getValue }) => formatNumber(getValue<number>()),
@@ -272,6 +279,7 @@ export function ApiKeysTable({
 				row.original.model ?? "",
 				row.original.inputTokens,
 				row.original.cachedInputTokens,
+				row.original.cacheWriteTokens,
 				row.original.outputTokens,
 				row.original.searchUnits ?? "",
 				row.original.requestType ?? "",
