@@ -31,6 +31,9 @@ ALTER TABLE requests
     ALTER COLUMN input_token_count DROP NOT NULL,
     ALTER COLUMN cached_input_token_count DROP NOT NULL,
     ALTER COLUMN output_token_count DROP NOT NULL,
+    ALTER COLUMN input_token_count DROP DEFAULT,
+    ALTER COLUMN cached_input_token_count DROP DEFAULT,
+    ALTER COLUMN output_token_count DROP DEFAULT,
     ALTER COLUMN request_type DROP DEFAULT;
 
 ALTER TABLE requests

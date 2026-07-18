@@ -1,8 +1,6 @@
 -- Remove backend/regional pricing dimensions.
 -- This migration drops pricing columns that are no longer used for stage selection.
 
-BEGIN;
-
 -- Deduplicate using the new backend-free natural key only.
 --
 -- This migration used to delete rows based on backend_name alone, but backend is
@@ -51,5 +49,3 @@ ON costs (
     stage_min_tokens,
     COALESCE(stage_max_tokens, -1)
 );
-
-COMMIT;
