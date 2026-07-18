@@ -36,10 +36,14 @@ import {
 	TableRow,
 } from "~/components/ui/table";
 import {
+	type BillingUnit,
+	billingUnitOptions,
 	CostStageType,
 	type CostUnit,
 	costStageTypeOptions,
 	costUnitOptions,
+	type RequestType,
+	requestTypeOptions,
 } from "~/lib/costs";
 
 export type CostRow = {
@@ -47,7 +51,9 @@ export type CostRow = {
 	model: string;
 	price: number;
 	validFrom: string | null;
-	tokenType: string;
+	tokenType: string | null;
+	requestType: RequestType;
+	billingUnit: BillingUnit;
 	unitOfMessure: CostUnit | null;
 	currency: string | null;
 	stageType: CostStageType | null;
@@ -60,7 +66,9 @@ type CostPayload = {
 	model: string;
 	price: number;
 	validFrom?: string;
-	tokenType: string;
+	tokenType?: string | null;
+	requestType: RequestType;
+	billingUnit: BillingUnit;
 	unitOfMessure?: CostUnit | null;
 	currency?: string | null;
 	stageType?: CostStageType | null;
@@ -114,7 +122,9 @@ function CostEditDialog({
 	const [open, setOpen] = useState(false);
 	const [mode, setMode] = useState<"update" | "modify">("update");
 	const [model, setModel] = useState(row.model);
-	const [tokenType, setTokenType] = useState(row.tokenType);
+	const [tokenType, setTokenType] = useState(row.tokenType ?? "");
+	const [requestType, setRequestType] = useState<RequestType>(row.requestType);
+	const [billingUnit, setBillingUnit] = useState<BillingUnit>(row.billingUnit);
 	const [price, setPrice] = useState(String(row.price));
 	const [validFrom, setValidFrom] = useState(row.validFrom ?? todayString());
 	const [stageType, setStageType] = useState<CostStageType>(
@@ -139,7 +149,7 @@ function CostEditDialog({
 		stageMaxTokensValue === null || !Number.isNaN(stageMaxTokensValue);
 	const canSubmit =
 		model.trim().length > 0 &&
-		tokenType.trim().length > 0 &&
+		(requestType === "RERANK" || tokenType.trim().length > 0) &&
 		!Number.isNaN(priceValue) &&
 		stageMaxTokensValid &&
 		stageMinTokens >= 0;
@@ -150,7 +160,9 @@ function CostEditDialog({
 			model: row.model,
 			price: row.price,
 			validFrom: row.validFrom ?? undefined,
-			tokenType: row.tokenType,
+			tokenType: row.tokenType ?? null,
+			requestType: row.requestType,
+			billingUnit: row.billingUnit,
 			unitOfMessure: row.unitOfMessure ?? null,
 			currency: row.currency ?? null,
 			stageType: row.stageType ?? CostStageType.ContextLength,
@@ -170,7 +182,9 @@ function CostEditDialog({
 				if (nextOpen) {
 					setMode("update");
 					setModel(row.model);
-					setTokenType(row.tokenType);
+					setTokenType(row.tokenType ?? "");
+					setRequestType(row.requestType);
+					setBillingUnit(row.billingUnit);
 					setPrice(String(row.price));
 					setValidFrom(row.validFrom ?? todayString());
 					setStageType(row.stageType ?? CostStageType.ContextLength);
@@ -217,6 +231,58 @@ function CostEditDialog({
 						<div className="flex flex-col gap-1">
 							<label
 								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-request-type-${fieldKey}`}
+							>
+								Request-Typ
+							</label>
+							<NativeSelect
+								id={`costs-request-type-${fieldKey}`}
+								onChange={(event) => {
+									const nextType = event.target.value as RequestType;
+									setRequestType(nextType);
+									setBillingUnit(nextType === "RERANK" ? "SEARCHES" : "TOKENS");
+									if (nextType === "RERANK") setTokenType("");
+								}}
+								value={requestType}
+							>
+								{requestTypeOptions.map((value) => (
+									<NativeSelectOption key={value} value={value}>
+										{value}
+									</NativeSelectOption>
+								))}
+							</NativeSelect>
+						</div>
+						<div className="flex flex-col gap-1">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor={`costs-billing-unit-${fieldKey}`}
+							>
+								Abrechnungseinheit
+							</label>
+							<NativeSelect
+								id={`costs-billing-unit-${fieldKey}`}
+								onChange={(event) =>
+									(() => {
+										const nextUnit = event.target.value as BillingUnit;
+										setBillingUnit(nextUnit);
+										setRequestType(
+											nextUnit === "SEARCHES" ? "RERANK" : "CHAT_COMPLETION",
+										);
+										if (nextUnit === "SEARCHES") setTokenType("");
+									})()
+								}
+								value={billingUnit}
+							>
+								{billingUnitOptions.map((value) => (
+									<NativeSelectOption key={value} value={value}>
+										{value}
+									</NativeSelectOption>
+								))}
+							</NativeSelect>
+						</div>
+						<div className="flex flex-col gap-1">
+							<label
+								className="font-medium text-muted-foreground text-xs"
 								htmlFor={`costs-model-${fieldKey}`}
 							>
 								Modell
@@ -239,7 +305,9 @@ function CostEditDialog({
 							<Input
 								id={`costs-token-${fieldKey}`}
 								onChange={(event) => setTokenType(event.target.value)}
-								placeholder="input"
+								placeholder={
+									requestType === "RERANK" ? "(nicht erforderlich)" : "input"
+								}
 								value={tokenType}
 							/>
 						</div>
@@ -385,7 +453,10 @@ function CostEditDialog({
 									model: model.trim(),
 									price: priceValue,
 									validFrom: effectiveValidFrom,
-									tokenType: tokenType.trim(),
+									requestType,
+									billingUnit,
+									tokenType:
+										requestType === "RERANK" ? null : tokenType.trim() || null,
 									unitOfMessure: unitOfMessure ?? null,
 									currency: currency.trim() || null,
 									stageType,
@@ -449,7 +520,7 @@ export function CostsTable({
 			}
 			if (
 				tokenFilter &&
-				!row.tokenType.toLowerCase().includes(tokenFilter.toLowerCase())
+				!(row.tokenType ?? "").toLowerCase().includes(tokenFilter.toLowerCase())
 			) {
 				return false;
 			}
@@ -462,6 +533,8 @@ export function CostsTable({
 			if (!search) return true;
 			const values = [
 				row.model,
+				row.requestType,
+				row.billingUnit,
 				row.tokenType,
 				row.price,
 				row.unitOfMessure ?? "",
@@ -486,6 +559,14 @@ export function CostsTable({
 			{
 				accessorKey: "tokenType",
 				header: "Token-Typ",
+			},
+			{
+				accessorKey: "requestType",
+				header: "Request-Typ",
+			},
+			{
+				accessorKey: "billingUnit",
+				header: "Abrechnungseinheit",
 			},
 			{
 				accessorKey: "stageType",

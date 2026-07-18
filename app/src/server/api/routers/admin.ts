@@ -1,7 +1,16 @@
 import { TRPCError } from "@trpc/server";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { CostStageType, costUnitOptions } from "~/lib/costs";
+import {
+	BillingUnit,
+	billingUnitOptions,
+	CostStageType,
+	costUnitOptions,
+	ModelType,
+	modelTypeOptions,
+	RequestType,
+	requestTypeOptions,
+} from "~/lib/costs";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { apikeys, costs, models, requests, users } from "~/server/db/schema";
 
@@ -19,19 +28,50 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 const rangeInput = z.enum(["24h", "7d", "30d", "all"]);
 const modelInput = z.object({
 	modelId: z.string().trim().min(1).max(255),
+	modelType: z.enum(modelTypeOptions).default(ModelType.ChatCompletion),
 });
-const costInput = z.object({
-	id: z.number().int().positive().optional(),
-	model: z.string().trim().min(1).max(255),
-	price: z.number().int().nonnegative(),
-	validFrom: z.string().trim().min(1).max(32).optional(),
-	tokenType: z.string().trim().min(1).max(255),
-	unitOfMessure: z.enum(costUnitOptions).optional().nullable(),
-	currency: z.string().trim().length(3).optional().nullable(),
-	stageType: z.nativeEnum(CostStageType).optional().nullable(),
-	stageMinTokens: z.number().int().min(0).optional(),
-	stageMaxTokens: z.number().int().min(0).optional().nullable(),
-});
+const costInput = z
+	.object({
+		id: z.number().int().positive().optional(),
+		model: z.string().trim().min(1).max(255),
+		price: z.number().int().nonnegative(),
+		validFrom: z.string().trim().min(1).max(32).optional(),
+		requestType: z.enum(requestTypeOptions).default(RequestType.ChatCompletion),
+		billingUnit: z.enum(billingUnitOptions).default(BillingUnit.Tokens),
+		tokenType: z.string().trim().max(255).optional().nullable(),
+		unitOfMessure: z.enum(costUnitOptions).optional().nullable(),
+		currency: z.string().trim().length(3).optional().nullable(),
+		stageType: z.nativeEnum(CostStageType).optional().nullable(),
+		stageMinTokens: z.number().int().min(0).optional(),
+		stageMaxTokens: z.number().int().min(0).optional().nullable(),
+	})
+	.superRefine((value, ctx) => {
+		const isRerank = value.requestType === RequestType.Rerank;
+		if (
+			value.billingUnit !==
+			(isRerank ? BillingUnit.Searches : BillingUnit.Tokens)
+		) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["billingUnit"],
+				message: "Billing unit does not match request type",
+			});
+		}
+		if (isRerank && value.tokenType) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["tokenType"],
+				message: "Rerank costs cannot have a token type",
+			});
+		}
+		if (!isRerank && !value.tokenType?.trim()) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["tokenType"],
+				message: "Token type is required for token costs",
+			});
+		}
+	});
 
 export const adminRouter = createTRPCRouter({
 	getUsageStats: adminProcedure
@@ -61,6 +101,10 @@ export const adminRouter = createTRPCRouter({
 						sql<number>`coalesce(sum(${requests.inputTokenCount} + ${requests.outputTokenCount}), 0)`.as(
 							"totalTokens",
 						),
+					totalSearchUnits:
+						sql<number>`coalesce(sum(${requests.searchUnits}), 0)`.as(
+							"totalSearchUnits",
+						),
 				})
 				.from(requests);
 			const totalRow = await (requestTimeFilter
@@ -70,16 +114,21 @@ export const adminRouter = createTRPCRouter({
 			const modelBase = ctx.db
 				.select({
 					model: requests.model,
+					requestType: requests.requestType,
 					tokens:
 						sql<number>`coalesce(sum(${requests.inputTokenCount} + ${requests.outputTokenCount}), 0)`.as(
 							"tokens",
+						),
+					searchUnits:
+						sql<number>`coalesce(sum(${requests.searchUnits}), 0)`.as(
+							"searchUnits",
 						),
 				})
 				.from(requests);
 			const modelRows = await (requestTimeFilter
 				? modelBase.where(requestTimeFilter)
 				: modelBase
-			).groupBy(requests.model);
+			).groupBy(requests.model, requests.requestType);
 
 			const requestsJoin = requestTimeFilter
 				? and(eq(apikeys.uuid, requests.apiKeyId), requestTimeFilter)
@@ -101,6 +150,10 @@ export const adminRouter = createTRPCRouter({
 						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
 							"outputTokens",
 						),
+					searchUnits:
+						sql<number>`coalesce(sum(${requests.searchUnits}), 0)`.as(
+							"searchUnits",
+						),
 					lastActivity: sql<string | null>`max(${requests.requestTime})`.as(
 						"lastActivity",
 					),
@@ -118,15 +171,19 @@ export const adminRouter = createTRPCRouter({
 				);
 
 			const totalTokens = Number(totalRow[0]?.totalTokens ?? 0);
+			const totalSearchUnits = Number(totalRow[0]?.totalSearchUnits ?? 0);
 
 			return {
 				totalTokens,
+				totalSearchUnits,
 				modelUsage: modelRows
 					.map((row) => ({
 						model: row.model ?? "Unknown",
+						requestType: row.requestType,
 						tokens: Number(row.tokens ?? 0),
+						searchUnits: Number(row.searchUnits ?? 0),
 					}))
-					.filter((row) => row.tokens > 0)
+					.filter((row) => row.tokens > 0 || row.searchUnits > 0)
 					.sort((a, b) => b.tokens - a.tokens),
 				users: userRows.map((row) => ({
 					id: row.id,
@@ -134,23 +191,28 @@ export const adminRouter = createTRPCRouter({
 					inputTokens: Number(row.inputTokens ?? 0),
 					cachedTokens: Number(row.cachedTokens ?? 0),
 					outputTokens: Number(row.outputTokens ?? 0),
+					searchUnits: Number(row.searchUnits ?? 0),
+					/*
+					 * Legacy alias removed; searchUnits is canonical.
+					rererankSearchUnits: Number(row.rererankSearchUnits ?? 0),
+					*/
 					lastActivity: row.lastActivity,
 				})),
 			};
 		}),
 	listModels: adminProcedure.query(async ({ ctx }) => {
 		const rows = await ctx.db
-			.select({ id: models.id })
+			.select({ id: models.id, modelType: models.modelType })
 			.from(models)
 			.orderBy(models.id);
-		return rows.map((row) => row.id);
+		return rows;
 	}),
 	addModel: adminProcedure
 		.input(modelInput)
 		.mutation(async ({ ctx, input }) => {
 			await ctx.db
 				.insert(models)
-				.values({ id: input.modelId })
+				.values({ id: input.modelId, modelType: input.modelType })
 				.onConflictDoNothing();
 		}),
 	deleteModel: adminProcedure
@@ -166,6 +228,8 @@ export const adminRouter = createTRPCRouter({
 				price: costs.price,
 				validFrom: costs.validFrom,
 				tokenType: costs.tokenType,
+				requestType: costs.requestType,
+				billingUnit: costs.billingUnit,
 				unitOfMessure: costs.unitOfMessure,
 				currency: costs.currency,
 				stageType: costs.stageType,
@@ -191,6 +255,8 @@ export const adminRouter = createTRPCRouter({
 					: null,
 			stageMinTokens: Number(row.stageMinTokens ?? 0),
 			stageMaxTokens: row.stageMaxTokens ?? null,
+			requestType: row.requestType,
+			billingUnit: row.billingUnit,
 		}));
 	}),
 	createCost: adminProcedure
@@ -206,7 +272,9 @@ export const adminRouter = createTRPCRouter({
 				model: input.model,
 				price: input.price,
 				validFrom,
-				tokenType: input.tokenType,
+				requestType: input.requestType,
+				billingUnit: input.billingUnit,
+				tokenType: input.tokenType ?? null,
 				unitOfMessure: input.unitOfMessure ?? null,
 				currency: input.currency ?? null,
 				stageType,
@@ -231,7 +299,9 @@ export const adminRouter = createTRPCRouter({
 				model: update.model,
 				price: update.price,
 				validFrom,
-				tokenType: update.tokenType,
+				requestType: update.requestType,
+				billingUnit: update.billingUnit,
+				tokenType: update.tokenType ?? null,
 				unitOfMessure: update.unitOfMessure ?? null,
 				currency: update.currency ?? null,
 				stageType,
@@ -268,7 +338,9 @@ export const adminRouter = createTRPCRouter({
 					model: update.model,
 					price: update.price,
 					validFrom,
-					tokenType: update.tokenType,
+					requestType: update.requestType,
+					billingUnit: update.billingUnit,
+					tokenType: update.tokenType ?? null,
 					unitOfMessure: update.unitOfMessure ?? null,
 					currency: update.currency ?? null,
 					stageType,
@@ -287,7 +359,11 @@ export const adminRouter = createTRPCRouter({
 									eq(costs.model, original.model),
 									eq(costs.price, original.price),
 									eq(costs.validFrom, original.validFrom),
-									eq(costs.tokenType, original.tokenType),
+									eq(costs.requestType, original.requestType),
+									eq(costs.billingUnit, original.billingUnit),
+									original.tokenType == null
+										? sql`${costs.tokenType} IS NULL`
+										: eq(costs.tokenType, original.tokenType),
 									eq(
 										costs.stageType,
 										original.stageType ?? CostStageType.ContextLength,

@@ -53,6 +53,7 @@ test("total cost aggregation keeps resolved rows after missing rows", () => {
 		missing: true,
 		cost: null,
 		currency: null,
+		currencyTotals: [{ currency: "EUR", totalCost: 3.75 }],
 	});
 });
 
@@ -82,7 +83,73 @@ test("breakdown aggregation keeps resolved parts after missing rows", () => {
 		inputCost: null,
 		cachedCost: null,
 		outputCost: null,
+		searchCost: null,
 		totalCost: null,
 		currency: null,
+		currencyTotals: [{ currency: "EUR", totalCost: 1.5 }],
 	});
+});
+
+test("parent total rejects mixed currencies", () => {
+	const aggregate = createTotalCostAggregate();
+	addResolvedTotalCost(aggregate, {
+		missing: false,
+		totalCost: 2,
+		currency: "USD",
+	});
+	addResolvedTotalCost(aggregate, {
+		missing: false,
+		totalCost: 3,
+		currency: "EUR",
+	});
+
+	assert.equal(aggregate.currencyIssue, true);
+	assert.deepEqual(presentTotalCost(aggregate), {
+		missing: false,
+		currencyIssue: true,
+		cost: null,
+		currency: null,
+		currencyTotals: [
+			{ currency: "EUR", totalCost: 3 },
+			{ currency: "USD", totalCost: 2 },
+		],
+	});
+});
+
+test("parent total preserves a single currency", () => {
+	const aggregate = createTotalCostAggregate();
+	addResolvedTotalCost(aggregate, {
+		missing: false,
+		totalCost: 2,
+		currency: "USD",
+	});
+	addResolvedTotalCost(aggregate, {
+		missing: false,
+		totalCost: 3,
+		currency: "usd",
+	});
+
+	assert.deepEqual(presentTotalCost(aggregate), {
+		missing: false,
+		currencyIssue: false,
+		cost: 5,
+		currency: "USD",
+		currencyTotals: [{ currency: "USD", totalCost: 5 }],
+	});
+});
+
+test("breakdown keeps search costs in the currency total", () => {
+	const aggregate = createBreakdownCostAggregate();
+	addResolvedBreakdownCost(aggregate, {
+		missing: false,
+		currency: "USD",
+		inputCost: { cost: 0 },
+		cachedCost: { cost: 0 },
+		outputCost: { cost: 0 },
+		searchCost: { cost: 0.002 },
+	});
+
+	assert.deepEqual(presentBreakdownCost(aggregate).currencyTotals, [
+		{ currency: "USD", totalCost: 0.002 },
+	]);
 });

@@ -22,6 +22,7 @@ const COST_SCALE_NUMBER = Number(COST_SCALE);
  *   inputCost: CostPartResolution;
  *   cachedCost: CostPartResolution;
  *   outputCost: CostPartResolution;
+ *   searchCost?: CostPartResolution;
  * }} BreakdownCostResolution
  */
 
@@ -30,6 +31,8 @@ const COST_SCALE_NUMBER = Number(COST_SCALE);
  *   missing: boolean;
  *   currency: string | null;
  *   totalCostScaled: bigint;
+ *   currencyTotals: Map<string, bigint>;
+ *   currencyIssue: boolean;
  * }} TotalCostAggregate
  */
 
@@ -40,6 +43,9 @@ const COST_SCALE_NUMBER = Number(COST_SCALE);
  *   inputCostScaled: bigint;
  *   cachedCostScaled: bigint;
  *   outputCostScaled: bigint;
+ *   searchCostScaled: bigint;
+ *   currencyTotals: Map<string, bigint>;
+ *   currencyIssue: boolean;
  * }} BreakdownCostAggregate
  */
 
@@ -81,6 +87,54 @@ export function mergeCurrency(current, next) {
 }
 
 /**
+ * @param {string | null} current
+ * @param {string | null | undefined} next
+ */
+export function mergeCurrencyState(current, next) {
+	const normalizedNext = normalizeCurrency(next);
+	if (normalizedNext === null) {
+		return { currency: current, issue: true };
+	}
+	if (current === null) {
+		return { currency: normalizedNext, issue: false };
+	}
+	return current === normalizedNext
+		? { currency: current, issue: false }
+		: { currency: null, issue: true };
+}
+
+export function createCurrencyTotals() {
+	return new Map();
+}
+
+/**
+ * @param {Map<string, bigint>} currencyTotals
+ * @param {string | null | undefined} currency
+ * @param {number | null | undefined} cost
+ */
+export function addCurrencyTotal(currencyTotals, currency, cost) {
+	const normalizedCurrency = normalizeCurrency(currency);
+	if (normalizedCurrency === null) return;
+	const scaledCost = scaleCost(cost);
+	currencyTotals.set(
+		normalizedCurrency,
+		(currencyTotals.get(normalizedCurrency) ?? 0n) + scaledCost,
+	);
+}
+
+/**
+ * @param {Map<string, bigint>} currencyTotals
+ */
+export function presentCurrencyTotals(currencyTotals) {
+	return Array.from(currencyTotals.entries())
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([currency, totalCostScaled]) => ({
+			currency,
+			totalCost: scaledCostToNumber(totalCostScaled),
+		}));
+}
+
+/**
  * @returns {TotalCostAggregate}
  */
 export function createTotalCostAggregate() {
@@ -88,6 +142,8 @@ export function createTotalCostAggregate() {
 		missing: false,
 		currency: null,
 		totalCostScaled: 0n,
+		currencyTotals: createCurrencyTotals(),
+		currencyIssue: false,
 	};
 }
 
@@ -102,7 +158,17 @@ export function addResolvedTotalCost(aggregate, resolved) {
 	}
 
 	aggregate.totalCostScaled += scaleCost(resolved.totalCost);
-	aggregate.currency = mergeCurrency(aggregate.currency, resolved.currency);
+	addCurrencyTotal(
+		aggregate.currencyTotals,
+		resolved.currency,
+		resolved.totalCost,
+	);
+	const currencyState = mergeCurrencyState(
+		aggregate.currency,
+		resolved.currency,
+	);
+	aggregate.currency = currencyState.currency;
+	aggregate.currencyIssue ||= currencyState.issue;
 	return aggregate;
 }
 
@@ -115,13 +181,20 @@ export function presentTotalCost(aggregate) {
 			missing: true,
 			cost: null,
 			currency: null,
+			currencyTotals: presentCurrencyTotals(
+				aggregate?.currencyTotals ?? new Map(),
+			),
 		};
 	}
 
 	return {
 		missing: false,
-		cost: scaledCostToNumber(aggregate.totalCostScaled),
-		currency: aggregate.currency,
+		currencyIssue: aggregate.currencyIssue,
+		currencyTotals: presentCurrencyTotals(aggregate.currencyTotals),
+		cost: aggregate.currencyIssue
+			? null
+			: scaledCostToNumber(aggregate.totalCostScaled),
+		currency: aggregate.currencyIssue ? null : aggregate.currency,
 	};
 }
 
@@ -135,6 +208,9 @@ export function createBreakdownCostAggregate() {
 		inputCostScaled: 0n,
 		cachedCostScaled: 0n,
 		outputCostScaled: 0n,
+		searchCostScaled: 0n,
+		currencyTotals: createCurrencyTotals(),
+		currencyIssue: false,
 	};
 }
 
@@ -151,7 +227,23 @@ export function addResolvedBreakdownCost(aggregate, resolved) {
 	aggregate.inputCostScaled += scaleCost(resolved.inputCost.cost);
 	aggregate.cachedCostScaled += scaleCost(resolved.cachedCost.cost);
 	aggregate.outputCostScaled += scaleCost(resolved.outputCost.cost);
-	aggregate.currency = mergeCurrency(aggregate.currency, resolved.currency);
+	addCurrencyTotal(
+		aggregate.currencyTotals,
+		resolved.currency,
+		resolved.inputCost.cost +
+			resolved.cachedCost.cost +
+			resolved.outputCost.cost +
+			(resolved.searchCost?.cost ?? 0),
+	);
+	if (resolved.searchCost) {
+		aggregate.searchCostScaled += scaleCost(resolved.searchCost.cost);
+	}
+	const currencyState = mergeCurrencyState(
+		aggregate.currency,
+		resolved.currency,
+	);
+	aggregate.currency = currencyState.currency;
+	aggregate.currencyIssue ||= currencyState.issue;
 	return aggregate;
 }
 
@@ -165,21 +257,31 @@ export function presentBreakdownCost(aggregate) {
 			inputCost: null,
 			cachedCost: null,
 			outputCost: null,
+			searchCost: null,
 			totalCost: null,
 			currency: null,
+			currencyTotals: presentCurrencyTotals(
+				aggregate?.currencyTotals ?? new Map(),
+			),
 		};
 	}
 
 	const inputCost = scaledCostToNumber(aggregate.inputCostScaled);
 	const cachedCost = scaledCostToNumber(aggregate.cachedCostScaled);
 	const outputCost = scaledCostToNumber(aggregate.outputCostScaled);
+	const searchCost = scaledCostToNumber(aggregate.searchCostScaled);
 
 	return {
 		missing: false,
+		currencyIssue: aggregate.currencyIssue,
+		currencyTotals: presentCurrencyTotals(aggregate.currencyTotals),
 		inputCost,
 		cachedCost,
 		outputCost,
-		totalCost: inputCost + cachedCost + outputCost,
-		currency: aggregate.currency,
+		searchCost,
+		totalCost: aggregate.currencyIssue
+			? null
+			: inputCost + cachedCost + outputCost + searchCost,
+		currency: aggregate.currencyIssue ? null : aggregate.currency,
 	};
 }

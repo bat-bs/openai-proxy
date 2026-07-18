@@ -1,4 +1,4 @@
-import type { CostUnit } from "~/lib/costs";
+import type { BillingUnit, CostUnit, RequestType } from "~/lib/costs";
 
 const ContextLengthStageType = "context_length" as const;
 
@@ -6,6 +6,8 @@ type CanonicalTokenType = "input" | "cached" | "output";
 
 export type CostStageRow = {
 	model: string;
+	requestType?: RequestType;
+	billingUnit?: BillingUnit;
 	tokenType: string;
 	price: number;
 	validFrom: string | Date;
@@ -32,6 +34,15 @@ export type RequestCostStageResolutionResult = {
 	inputCost: TokenCostStageResolutionResult;
 	cachedCost: TokenCostStageResolutionResult;
 	outputCost: TokenCostStageResolutionResult;
+};
+
+export type RerankCostResolutionResult = {
+	cost: number;
+	currency: string | null;
+	unit: CostUnit | null;
+	usedCost: CostStageRow | null;
+	missing: boolean;
+	ambiguous: boolean;
 };
 
 function normalizeKey(s: string) {
@@ -112,7 +123,9 @@ export function buildCostStageIndex(costRows: CostStageRow[]) {
 		const stageTypeKey = normalizeKey(row.stageType || ContextLengthStageType);
 
 		// tokenKey is canonicalized to input/cached/output when possible.
-		const key = `${modelKey}|${tokenKey}|${stageTypeKey}`;
+		const requestType = row.requestType ?? "CHAT_COMPLETION";
+		const billingUnit = row.billingUnit ?? "TOKENS";
+		const key = `${modelKey}|${requestType}|${billingUnit}|${tokenKey}|${stageTypeKey}`;
 		const existing = index.get(key) ?? [];
 		existing.push(row);
 		index.set(key, existing);
@@ -301,7 +314,7 @@ export function resolveRequestCostStage(
 		tokenType: CanonicalTokenType,
 		tokensToBill: number,
 	) => {
-		const key = `${modelKey}|${tokenType}|${stageTypeKey}`;
+		const key = `${modelKey}|CHAT_COMPLETION|TOKENS|${tokenType}|${stageTypeKey}`;
 		const costRowsForKey = costStageIndex.get(key) ?? [];
 		return resolveTokenCostStage(costRowsForKey, {
 			requestTime: req.requestTime,
@@ -349,6 +362,85 @@ export function resolveRequestCostStage(
 		inputCost,
 		cachedCost,
 		outputCost,
+	};
+}
+
+export function resolveRerankCost(
+	costRows: CostStageRow[],
+	request: {
+		model: string;
+		requestTime: Date;
+		searchUnits: number;
+	},
+): RerankCostResolutionResult {
+	if (request.searchUnits <= 0) {
+		return {
+			cost: 0,
+			currency: null,
+			unit: null,
+			usedCost: null,
+			missing: false,
+			ambiguous: false,
+		};
+	}
+
+	const candidates = costRows.filter(
+		(row) =>
+			normalizeKey(row.model) === normalizeKey(request.model) &&
+			(row.requestType ?? "CHAT_COMPLETION") === "RERANK" &&
+			(row.billingUnit ?? "TOKENS") === "SEARCHES" &&
+			toMs(row.validFrom) <= request.requestTime.getTime(),
+	);
+	if (!candidates.length) {
+		return {
+			cost: 0,
+			currency: null,
+			unit: null,
+			usedCost: null,
+			missing: true,
+			ambiguous: false,
+		};
+	}
+
+	const latest = Math.max(...candidates.map((row) => toMs(row.validFrom)));
+	const matching = candidates.filter((row) => toMs(row.validFrom) === latest);
+	const best = matching[0];
+	if (!best) {
+		return {
+			cost: 0,
+			currency: null,
+			unit: null,
+			usedCost: null,
+			missing: true,
+			ambiguous: false,
+		};
+	}
+	const ambiguous = matching.some(
+		(row) =>
+			row.price !== best.price ||
+			row.unitOfMessure !== best.unitOfMessure ||
+			(row.currency ?? null) !== (best.currency ?? null),
+	);
+	if (ambiguous) {
+		return {
+			cost: 0,
+			currency: null,
+			unit: null,
+			usedCost: null,
+			missing: true,
+			ambiguous: true,
+		};
+	}
+
+	return {
+		cost:
+			(request.searchUnits / unitDivisor(best.unitOfMessure)) *
+			priceToCurrency(best.price),
+		currency: best.currency?.trim() ?? null,
+		unit: best.unitOfMessure ?? null,
+		usedCost: best,
+		missing: false,
+		ambiguous: false,
 	};
 }
 

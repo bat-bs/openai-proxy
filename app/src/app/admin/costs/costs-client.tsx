@@ -9,10 +9,14 @@ import {
 	NativeSelectOption,
 } from "~/components/ui/native-select";
 import {
+	BillingUnit,
+	billingUnitOptions,
 	CostStageType,
 	type CostUnit,
 	costStageTypeOptions,
 	costUnitOptions,
+	RequestType,
+	requestTypeOptions,
 } from "~/lib/costs";
 import { api } from "~/trpc/react";
 import { CostsTable } from "./costs-table";
@@ -32,6 +36,12 @@ export function CostsClient() {
 
 	const [model, setModel] = useState("");
 	const [tokenType, setTokenType] = useState(defaultTokenType);
+	const [requestType, setRequestType] = useState<RequestType>(
+		RequestType.ChatCompletion,
+	);
+	const [billingUnit, setBillingUnit] = useState<BillingUnit>(
+		BillingUnit.Tokens,
+	);
 	const [price, setPrice] = useState("");
 	const [validFrom, setValidFrom] = useState(todayString());
 	const [unitOfMessure, setUnitOfMessure] = useState<CostUnit>(defaultUnit);
@@ -46,6 +56,8 @@ export function CostsClient() {
 		onSuccess: async () => {
 			setModel("");
 			setTokenType(defaultTokenType);
+			setRequestType(RequestType.ChatCompletion);
+			setBillingUnit(BillingUnit.Tokens);
 			setPrice("");
 			setValidFrom(todayString());
 			setUnitOfMessure(defaultUnit);
@@ -210,6 +222,64 @@ export function CostsClient() {
 								/>
 							</div>
 						</div>
+						<div className="grid gap-3 md:grid-cols-2">
+							<div className="flex flex-col gap-1">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-request-type"
+								>
+									Request-Typ
+								</label>
+								<NativeSelect
+									id="costs-create-request-type"
+									onChange={(event) => {
+										const nextType = event.target.value as RequestType;
+										setRequestType(nextType);
+										setBillingUnit(
+											nextType === RequestType.Rerank
+												? BillingUnit.Searches
+												: BillingUnit.Tokens,
+										);
+										if (nextType === RequestType.Rerank) setTokenType("");
+									}}
+									value={requestType}
+								>
+									{requestTypeOptions.map((value) => (
+										<NativeSelectOption key={value} value={value}>
+											{value}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
+							</div>
+							<div className="flex flex-col gap-1">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor="costs-create-billing-unit"
+								>
+									Abrechnungseinheit
+								</label>
+								<NativeSelect
+									id="costs-create-billing-unit"
+									onChange={(event) => {
+										const nextUnit = event.target.value as BillingUnit;
+										setBillingUnit(nextUnit);
+										setRequestType(
+											nextUnit === BillingUnit.Searches
+												? RequestType.Rerank
+												: RequestType.ChatCompletion,
+										);
+										if (nextUnit === BillingUnit.Searches) setTokenType("");
+									}}
+									value={billingUnit}
+								>
+									{billingUnitOptions.map((value) => (
+										<NativeSelectOption key={value} value={value}>
+											{value}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
+							</div>
+						</div>
 
 						<div className="mt-4 grid gap-3 md:grid-cols-3">
 							<div className="flex flex-col gap-1">
@@ -278,7 +348,12 @@ export function CostsClient() {
 										model: model.trim(),
 										price: priceValue,
 										validFrom: validFrom || undefined,
-										tokenType: tokenType.trim(),
+										requestType,
+										billingUnit,
+										tokenType:
+											requestType === RequestType.Rerank
+												? null
+												: tokenType.trim(),
 										unitOfMessure: unitOfMessure ?? null,
 										currency: currency.trim() || null,
 										stageType,
@@ -309,7 +384,7 @@ export function CostsClient() {
 
 			<datalist id="costs-models">
 				{models.map((model) => (
-					<option key={model} value={model} />
+					<option key={model.id} value={model.id} />
 				))}
 			</datalist>
 		</div>

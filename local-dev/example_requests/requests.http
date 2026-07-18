@@ -39,3 +39,17 @@ Authorization: Bearer <your-dev-token-here>
     }
   ]
 }
+
+###
+POST http://localhost:8082/api/v1/rerank
+Content-Type: application/json
+Authorization: Bearer <your-dev-token-here>
+
+{
+  "model": "Cohere-rerank-v4.0-fast",
+  "query": "What are the health benefits of green tea?",
+  "documents": [
+    "Green tea contains antioxidants called catechins that may help reduce inflammation.",
+    "Basketball is one of the most popular sports in the United States."
+  ]
+}

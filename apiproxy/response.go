@@ -41,6 +41,9 @@ type Content struct {
 }
 
 func (rc *ResponseConf) NewResponse(in *http.Response) error {
+	if in.Request == nil || in.Request.URL == nil || !isUsagePersistencePath(in.Request.URL.Path) {
+		return nil
+	}
 
 	ct := in.Header.Get("Content-Type")
 	if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
@@ -84,6 +87,11 @@ func (rc *ResponseConf) NewResponse(in *http.Response) error {
 	}
 	r.ProcessValues()
 	return nil
+}
+
+func isUsagePersistencePath(path string) bool {
+	path = strings.TrimSuffix(strings.ToLower(path), "/")
+	return strings.HasSuffix(path, "/chat/completions") || strings.HasSuffix(path, "/responses")
 }
 
 func (r *Response) GetApiKeyUUID() string {
@@ -202,18 +210,19 @@ func (r *Response) ProcessValues() {
 	rq := db.Request{
 		ID:                    c.ID,
 		ApiKeyID:              r.apiKeyID,
-		TokenCountPrompt:      promptTokens,
-		TokenCountComplete:    ccount,
-		InputTokenCount:       pcount,
-		CachedInputTokenCount: cached,
-		OutputTokenCount:      ccount,
+		RequestType:           db.RequestTypeChatCompletion,
+		TokenCountPrompt:      intPointer(promptTokens),
+		TokenCountComplete:    intPointer(ccount),
+		InputTokenCount:       intPointer(pcount),
+		CachedInputTokenCount: intPointer(cached),
+		OutputTokenCount:      intPointer(ccount),
 		Model:                 modelAlias,
 		SnapshotVersion:       snapshot,
 		IsApproximated:        false,
 	}
 
 	if os.Getenv("DEV_LOG_TOKEN_COUNT") == "1" {
-		total := rq.TokenCountPrompt + rq.TokenCountComplete
+		total := promptTokens + ccount
 		log.Printf("DEV LOG: Token counts for Response id=%s api_key_id=%s model=%s prompt=%d completion=%d total=%d usage=%v", r.apiKeyID, rq.ApiKeyID, rq.Model, rq.TokenCountPrompt, rq.TokenCountComplete, total, c.Usage)
 	}
 
@@ -239,6 +248,10 @@ func getUsageInt(m map[string]int, key string) int {
 		return v
 	}
 	return 0
+}
+
+func intPointer(value int) *int {
+	return &value
 }
 
 // extractTokenCounts maps a flexible usage map into prompt/completion/total
@@ -579,11 +592,12 @@ func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 					rq := db.Request{
 						ID:                    respID,
 						ApiKeyID:              apiKeyID,
-						TokenCountPrompt:      promptTokens,
-						TokenCountComplete:    finalCompletion,
-						InputTokenCount:       finalPrompt,
-						CachedInputTokenCount: finalCached,
-						OutputTokenCount:      finalCompletion,
+						RequestType:           db.RequestTypeChatCompletion,
+						TokenCountPrompt:      intPointer(promptTokens),
+						TokenCountComplete:    intPointer(finalCompletion),
+						InputTokenCount:       intPointer(finalPrompt),
+						CachedInputTokenCount: intPointer(finalCached),
+						OutputTokenCount:      intPointer(finalCompletion),
 						Model:                 modelAlias,
 						SnapshotVersion:       snapshot,
 						IsApproximated:        estimatedUsed,
@@ -710,11 +724,12 @@ func (rc *ResponseConf) parseSSEStream(r io.Reader, req *http.Request) {
 		rq := db.Request{
 			ID:                    lastID,
 			ApiKeyID:              apiKeyID,
-			TokenCountPrompt:      promptTokens,
-			TokenCountComplete:    finalCompletion,
-			InputTokenCount:       finalPrompt,
-			CachedInputTokenCount: finalCached,
-			OutputTokenCount:      finalCompletion,
+			RequestType:           db.RequestTypeChatCompletion,
+			TokenCountPrompt:      intPointer(promptTokens),
+			TokenCountComplete:    intPointer(finalCompletion),
+			InputTokenCount:       intPointer(finalPrompt),
+			CachedInputTokenCount: intPointer(finalCached),
+			OutputTokenCount:      intPointer(finalCompletion),
 			Model:                 modelAlias,
 			SnapshotVersion:       snapshot,
 			IsApproximated:        estimated,

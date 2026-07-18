@@ -12,13 +12,17 @@ import (
 	db "openai-api-proxy/db"
 	"os"
 	"strings"
+	"time"
 )
 
 type AzureConfig struct {
-	DeploymentName string
-	RessourceName  string
-	BaseUrl        string
-	ApiKey         string
+	DeploymentName         string
+	RessourceName          string
+	BaseUrl                string
+	ApiKey                 string
+	RerankTimeout          time.Duration
+	RerankMaxRequestBytes  int64
+	RerankMaxResponseBytes int64
 }
 
 var (
@@ -33,36 +37,56 @@ var (
 		"openai":     "https://api.openai.com/",
 		"openrouter": "https://openrouter.ai/api/",
 	}
-
-	backendProxy = make(map[string]*httputil.ReverseProxy)
 )
 
 func Init(mux *http.ServeMux, db *db.Database) {
 	// Setup Azure Vars and Connection String
 	azconf := &AzureConfig{
-		DeploymentName: os.Getenv("DEPLOYMENT_NAME"),
-		RessourceName:  os.Getenv("RESSOURCE_NAME"),
-		BaseUrl:        os.Getenv("BASE_URL"),
+		DeploymentName:         os.Getenv("DEPLOYMENT_NAME"),
+		RessourceName:          os.Getenv("RESSOURCE_NAME"),
+		BaseUrl:                os.Getenv("BASE_URL"),
+		ApiKey:                 os.Getenv("AZURE_API_KEY"),
+		RerankTimeout:          rerankTimeoutFromEnv(),
+		RerankMaxRequestBytes:  rerankMaxRequestBytesFromEnv(),
+		RerankMaxResponseBytes: rerankMaxResponseBytesFromEnv(),
 	}
 	defaultBackend = os.Getenv("DEFAULT_BACKEND")
 	rc := &ResponseConf{
 		db: db,
 	}
 	h := &baseHandle{
-		db: db,
-		az: azconf,
-		rc: rc}
+		db:           db,
+		az:           azconf,
+		rc:           rc,
+		rerankClient: &http.Client{Timeout: azconf.RerankTimeout},
+	}
 	mux.Handle("/api/", h)
 
 }
 
 type baseHandle struct {
-	db *db.Database
-	az *AzureConfig
-	rc *ResponseConf
+	db                     ProxyDB
+	az                     *AzureConfig
+	rc                     *ResponseConf
+	rerankClient           *http.Client
+	clientTokenValidator   func(http.ResponseWriter, *http.Request) bool
+	rerankEndpointOverride string
+}
+
+type ProxyDB interface {
+	LookupApiKeys(string) ([]db.ApiKey, error)
+	ListConfiguredModels() ([]string, error)
+	LookupConfiguredModelType(string) (string, bool, error)
+	WriteRequest(*db.Request) error
+	WriteRerankRequest(*db.Request) error
 }
 
 func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/rerank" || r.URL.Path == "/api/rerank/" ||
+		r.URL.Path == "/api/v1/rerank" || r.URL.Path == "/api/v1/rerank/" {
+		h.HandleRerank(w, r)
+		return
+	}
 	// Intercept OpenAI-compatible models endpoints and serve locally
 	if strings.HasPrefix(r.URL.Path, "/api/models") || strings.HasPrefix(r.URL.Path, "/api/v1/models") {
 		h.handleModels(w, r)
@@ -120,11 +144,7 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	// the forwarded path will include `/v1/responses`, and combined with the
 	// `/openai` base will produce `/openai/v1/responses` as desired.
 	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
-	// Preserve incoming query parameters unchanged.
-	r.URL.RawQuery = r.URL.RawQuery
 	ensureStreamUsageForChatCompletions(r)
-
-	backendProxy[r.Host] = proxy
 
 	// Before proxying, log the intended complete URL.
 	actualURL := *remoteUrl // Make a copy of the URL struct
@@ -150,7 +170,11 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 				headers[k] = strings.Join(v, ",")
 			}
 		}
-		log.Printf("Outgoing request: %s %s headers=%v body_preview=%s", r.Method, actualURL.Path, headers, preview(bbuf, 200))
+		if strings.Contains(strings.ToLower(r.URL.Path), "/rerank") {
+			log.Printf("Outgoing request: %s %s headers=%v body_bytes=%d", r.Method, actualURL.Path, headers, len(bbuf))
+		} else {
+			log.Printf("Outgoing request: %s %s headers=%v body_preview=%s", r.Method, actualURL.Path, headers, preview(bbuf, 200))
+		}
 	}
 
 	proxy.ModifyResponse = h.rc.NewResponse
@@ -249,7 +273,7 @@ func (h *baseHandle) SetAzureUrl(r *http.Request) *url.URL {
 	// Use the Azure OpenAI v1 base path. Clients call `/api/v1/...` and the
 	// proxy preserves the `/v1` segment, so combining this base with the
 	// incoming path yields `/openai/v1/...` as required by the v1 API.
-	azureUrl := fmt.Sprintf("https://%s.%s/openai", h.az.DeploymentName, h.az.BaseUrl)
+	azureUrl := fmt.Sprintf("https://%s/openai", azureServiceHost("openai", h.az.DeploymentName, h.az.BaseUrl))
 	url, err := url.Parse(azureUrl)
 	if err != nil {
 		log.Println("target parse fail:", err)

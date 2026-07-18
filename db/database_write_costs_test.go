@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"regexp"
 	"testing"
 	"time"
@@ -32,27 +33,20 @@ func TestWriteCosts_IgnoresDuplicateNaturalKeys(t *testing.T) {
 	insertQuery := regexp.QuoteMeta(`
 		INSERT INTO costs
 		  (
-		    model, price, valid_from, token_type, unit_of_messure,
+	    model, price, valid_from, request_type, billing_unit, token_type, unit_of_messure,
 		    currency, stage_type, stage_min_tokens, stage_max_tokens
 		  )
 		VALUES
-		  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (
-		  model,
-		  valid_from,
-		  token_type,
-		  unit_of_messure,
-		  currency,
-		  stage_type,
-		  stage_min_tokens,
-		  (COALESCE(stage_max_tokens, -1))
-		) DO NOTHING`)
+	  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT DO NOTHING`)
 
 	mock.ExpectExec(insertQuery).
 		WithArgs(
 			cost.ModelName,
 			cost.RetailPrice,
 			cost.RequestTime,
+			RequestTypeChatCompletion,
+			BillingUnitTokens,
 			cost.TokenType,
 			cost.UnitOfMeasure,
 			cost.Currency,
@@ -66,6 +60,8 @@ func TestWriteCosts_IgnoresDuplicateNaturalKeys(t *testing.T) {
 			cost.ModelName,
 			cost.RetailPrice,
 			cost.RequestTime,
+			RequestTypeChatCompletion,
+			BillingUnitTokens,
 			cost.TokenType,
 			cost.UnitOfMeasure,
 			cost.Currency,
@@ -106,27 +102,20 @@ func TestWriteCosts_DefaultsMissingCollectorFields(t *testing.T) {
 	insertQuery := regexp.QuoteMeta(`
 		INSERT INTO costs
 		  (
-		    model, price, valid_from, token_type, unit_of_messure,
+	    model, price, valid_from, request_type, billing_unit, token_type, unit_of_messure,
 		    currency, stage_type, stage_min_tokens, stage_max_tokens
 		  )
 		VALUES
-		  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (
-		  model,
-		  valid_from,
-		  token_type,
-		  unit_of_messure,
-		  currency,
-		  stage_type,
-		  stage_min_tokens,
-		  (COALESCE(stage_max_tokens, -1))
-		) DO NOTHING`)
+	  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT DO NOTHING`)
 
 	mock.ExpectExec(insertQuery).
 		WithArgs(
 			cost.ModelName,
 			cost.RetailPrice,
 			sqlmock.AnyArg(),
+			RequestTypeChatCompletion,
+			BillingUnitTokens,
 			cost.TokenType,
 			cost.UnitOfMeasure,
 			cost.Currency,
@@ -142,5 +131,40 @@ func TestWriteCosts_DefaultsMissingCollectorFields(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet: %v", err)
+	}
+}
+
+func TestWriteCostsReturnsDatabaseErrors(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer sqlDB.Close()
+
+	database := &Database{db: sqlDB}
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO costs
+		  (
+	    model, price, valid_from, request_type, billing_unit, token_type, unit_of_messure,
+		    currency, stage_type, stage_min_tokens, stage_max_tokens
+		  )
+		VALUES
+	  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT DO NOTHING`)).
+		WithArgs("broken-model", 1, sqlmock.AnyArg(), RequestTypeChatCompletion, BillingUnitTokens, "input", "1M", "USD", ContextLengthStageType, 0, nil).
+		WillReturnError(fmt.Errorf("database unavailable"))
+
+	err = database.WriteCosts([]*Costs{{
+		ModelName:     "broken-model",
+		RetailPrice:   1,
+		TokenType:     "input",
+		UnitOfMeasure: "1M",
+		Currency:      "USD",
+	}})
+	if err == nil {
+		t.Fatal("expected WriteCosts to return the database error")
+	}
+	if mockErr := mock.ExpectationsWereMet(); mockErr != nil {
+		t.Fatalf("mock expectations: %v", mockErr)
 	}
 }

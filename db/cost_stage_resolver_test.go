@@ -256,3 +256,51 @@ func TestResolveRequestCostStage_AmbiguousOverlappingStagesResolvedDeterministic
 		t.Fatalf("expected overlapping stage B price=20, got %d", res.InputCost.UsedCost.RetailPrice)
 	}
 }
+
+func TestResolveRerankCostUsesSearchPricing(t *testing.T) {
+	validFrom := time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC)
+	res := ResolveRerankCost([]Costs{{
+		ModelName:     "cohere-rerank-v3.5",
+		RetailPrice:   250,
+		RequestType:   RequestTypeRerank,
+		BillingUnit:   BillingUnitSearches,
+		UnitOfMeasure: "1K",
+		Currency:      "USD",
+		RequestTime:   validFrom,
+	}}, RerankCostResolutionRequest{
+		Model:       "cohere-rerank-v3.5",
+		RequestTime: validFrom.Add(time.Hour),
+		SearchUnits: 3,
+	})
+
+	if res.Missing || res.Ambiguous {
+		t.Fatalf("expected an unambiguous rerank cost, got %+v", res)
+	}
+	if res.Cost != 0.0075 {
+		t.Fatalf("expected cost 0.0075, got %v", res.Cost)
+	}
+	if res.Currency != "USD" || res.Unit != "1K" {
+		t.Fatalf("unexpected currency or unit: %+v", res)
+	}
+}
+
+func TestResolveRerankCostIgnoresTokenPricing(t *testing.T) {
+	res := ResolveRerankCost([]Costs{{
+		ModelName:     "cohere-rerank-v3.5",
+		RetailPrice:   250,
+		RequestType:   RequestTypeChatCompletion,
+		BillingUnit:   BillingUnitTokens,
+		TokenType:     "input",
+		UnitOfMeasure: "1K",
+		Currency:      "USD",
+		RequestTime:   time.Now().UTC(),
+	}}, RerankCostResolutionRequest{
+		Model:       "cohere-rerank-v3.5",
+		RequestTime: time.Now().UTC(),
+		SearchUnits: 1,
+	})
+
+	if !res.Missing {
+		t.Fatalf("expected token pricing to be ignored for rerank: %+v", res)
+	}
+}

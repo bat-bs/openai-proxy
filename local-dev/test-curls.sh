@@ -17,3 +17,15 @@ curl -v http://localhost:8082/api/v1/responses \
 "temperature":0.7,
 "max_output_tokens":100
 }' | jq .
+
+curl -v http://localhost:8082/api/v1/rerank \
+-H "Authorization: Bearer $LOCAL_OPENAI_API_KEY" \
+-H "Content-Type: application/json" \
+-d '{
+"model":"Cohere-rerank-v4.0-fast",
+"query":"What are the health benefits of green tea?",
+"documents":[
+  "Green tea contains antioxidants called catechins that may help reduce inflammation.",
+  "Basketball is one of the most popular sports in the United States."
+]
+}' | jq .

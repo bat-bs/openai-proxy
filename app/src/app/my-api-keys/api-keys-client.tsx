@@ -192,17 +192,23 @@ export function ApiKeysClient() {
 						inputTokens: row.inputTokens,
 						cachedInputTokens: row.cachedInputTokens,
 						outputTokens: row.outputTokens,
+						searchUnits: row.searchUnits,
 						createdAt: row.createdAt,
 						cost: row.cost ?? null,
 						currency: row.currency ?? null,
+						currencyIssue: row.currencyIssue,
+						currencyTotals: row.currencyTotals,
 						subRows: row.models.map((modelRow) => ({
 							kind: "model",
 							model: modelRow.model,
 							inputTokens: modelRow.inputTokens,
 							cachedInputTokens: modelRow.cachedInputTokens,
 							outputTokens: modelRow.outputTokens,
+							searchUnits: modelRow.searchUnits,
+							requestType: modelRow.requestType,
 							cost: modelRow.cost ?? null,
 							currency: modelRow.currency ?? null,
+							currencyTotals: modelRow.currencyTotals,
 						})),
 					}))}
 					deactivatingId={deactivatingId}

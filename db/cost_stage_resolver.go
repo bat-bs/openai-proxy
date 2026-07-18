@@ -9,6 +9,8 @@ const ContextLengthStageType = "context_length"
 
 type TokenCostStageResolutionRequest struct {
 	Model               string
+	RequestType         string
+	BillingUnit         string
 	TokenType           string
 	StageType           string
 	RequestTime         time.Time
@@ -27,11 +29,27 @@ type TokenCostStageResolutionResult struct {
 
 type RequestCostStageResolutionRequest struct {
 	Model                 string
+	RequestType           string
 	RequestTime           time.Time
 	InputTokenCount       int
 	CachedInputTokenCount int
 	OutputTokenCount      int
 	StageType             string
+}
+
+type RerankCostResolutionRequest struct {
+	Model       string
+	RequestTime time.Time
+	SearchUnits int
+}
+
+type RerankCostResolutionResult struct {
+	Cost      float64
+	Currency  string
+	Unit      string
+	UsedCost  *Costs
+	Missing   bool
+	Ambiguous bool
 }
 
 type RequestCostStageResolutionResult struct {
@@ -60,6 +78,20 @@ func canonicalTokenTypeKey(tokenType string) string {
 	default:
 		return t
 	}
+}
+
+func costRequestType(c Costs) string {
+	if strings.TrimSpace(c.RequestType) == "" {
+		return RequestTypeChatCompletion
+	}
+	return c.RequestType
+}
+
+func costBillingUnit(c Costs) string {
+	if strings.TrimSpace(c.BillingUnit) == "" {
+		return BillingUnitTokens
+	}
+	return c.BillingUnit
 }
 
 func unitDivisor(unit string) float64 {
@@ -97,6 +129,12 @@ func ResolveTokenCostStage(costRows []Costs, req TokenCostStageResolutionRequest
 	if req.StageType == "" {
 		req.StageType = ContextLengthStageType
 	}
+	if req.RequestType == "" {
+		req.RequestType = RequestTypeChatCompletion
+	}
+	if req.BillingUnit == "" {
+		req.BillingUnit = BillingUnitTokens
+	}
 	if req.TokensToBill <= 0 {
 		return TokenCostStageResolutionResult{
 			Cost:      0,
@@ -115,6 +153,9 @@ func ResolveTokenCostStage(costRows []Costs, req TokenCostStageResolutionRequest
 	candidates := make([]Costs, 0, len(costRows))
 	for _, c := range costRows {
 		if normalizeKey(c.ModelName) != modelKey {
+			continue
+		}
+		if costRequestType(c) != req.RequestType || costBillingUnit(c) != req.BillingUnit {
 			continue
 		}
 		if canonicalTokenTypeKey(c.TokenType) != tokenKey {
@@ -231,6 +272,9 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 	if req.StageType == "" {
 		req.StageType = ContextLengthStageType
 	}
+	if req.RequestType == "" {
+		req.RequestType = RequestTypeChatCompletion
+	}
 
 	promptTokens := req.InputTokenCount - req.CachedInputTokenCount
 	if promptTokens < 0 {
@@ -248,6 +292,8 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 	inputRes := ResolveTokenCostStage(costRows, TokenCostStageResolutionRequest{
 		Model:               req.Model,
 		TokenType:           "input",
+		RequestType:         req.RequestType,
+		BillingUnit:         BillingUnitTokens,
 		StageType:           req.StageType,
 		RequestTime:         req.RequestTime,
 		InputTokensForStage: req.InputTokenCount,
@@ -256,6 +302,8 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 	cachedRes := ResolveTokenCostStage(costRows, TokenCostStageResolutionRequest{
 		Model:               req.Model,
 		TokenType:           "cached",
+		RequestType:         req.RequestType,
+		BillingUnit:         BillingUnitTokens,
 		StageType:           req.StageType,
 		RequestTime:         req.RequestTime,
 		InputTokensForStage: req.InputTokenCount,
@@ -264,6 +312,8 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 	outputRes := ResolveTokenCostStage(costRows, TokenCostStageResolutionRequest{
 		Model:               req.Model,
 		TokenType:           "output",
+		RequestType:         req.RequestType,
+		BillingUnit:         BillingUnitTokens,
 		StageType:           req.StageType,
 		RequestTime:         req.RequestTime,
 		InputTokensForStage: req.InputTokenCount,
@@ -317,5 +367,54 @@ func ResolveRequestCostStage(costRows []Costs, req RequestCostStageResolutionReq
 		InputCost:  inputRes,
 		CachedCost: cachedRes,
 		OutputCost: outputRes,
+	}
+}
+
+func ResolveRerankCost(costRows []Costs, req RerankCostResolutionRequest) RerankCostResolutionResult {
+	if req.SearchUnits <= 0 {
+		return RerankCostResolutionResult{}
+	}
+	modelKey := normalizeKey(req.Model)
+	var candidates []Costs
+	for _, c := range costRows {
+		if normalizeKey(c.ModelName) != modelKey ||
+			costRequestType(c) != RequestTypeRerank ||
+			costBillingUnit(c) != BillingUnitSearches ||
+			c.RequestTime.After(req.RequestTime) {
+			continue
+		}
+		candidates = append(candidates, c)
+	}
+	if len(candidates) == 0 {
+		return RerankCostResolutionResult{Missing: true}
+	}
+	latest := candidates[0].RequestTime
+	for _, c := range candidates[1:] {
+		if c.RequestTime.After(latest) {
+			latest = c.RequestTime
+		}
+	}
+	var matching []Costs
+	for _, c := range candidates {
+		if c.RequestTime.Equal(latest) {
+			matching = append(matching, c)
+		}
+	}
+	if len(matching) == 0 {
+		return RerankCostResolutionResult{Missing: true}
+	}
+	best := matching[0]
+	for _, c := range matching[1:] {
+		if c.RetailPrice != best.RetailPrice ||
+			strings.TrimSpace(c.UnitOfMeasure) != strings.TrimSpace(best.UnitOfMeasure) ||
+			strings.TrimSpace(c.Currency) != strings.TrimSpace(best.Currency) {
+			return RerankCostResolutionResult{Missing: true, Ambiguous: true}
+		}
+	}
+	return RerankCostResolutionResult{
+		Cost:     (float64(req.SearchUnits) / unitDivisor(best.UnitOfMeasure)) * priceToCurrency(best.RetailPrice),
+		Currency: strings.TrimSpace(best.Currency),
+		Unit:     strings.TrimSpace(best.UnitOfMeasure),
+		UsedCost: &best,
 	}
 }

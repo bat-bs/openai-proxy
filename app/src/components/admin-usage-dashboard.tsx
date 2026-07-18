@@ -39,7 +39,9 @@ import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 
 type UsageModel = {
 	model: string;
+	requestType: string;
 	tokens: number;
+	searchUnits: number;
 };
 
 type UsageUser = {
@@ -48,11 +50,13 @@ type UsageUser = {
 	inputTokens: number;
 	cachedTokens: number;
 	outputTokens: number;
+	searchUnits: number;
 	lastActivity: string | null;
 };
 
 type UsageStats = {
 	totalTokens: number;
+	totalSearchUnits: number;
 	modelUsage: UsageModel[];
 	users: UsageUser[];
 };
@@ -101,7 +105,8 @@ export function AdminUsageDashboard({
 		return {
 			key,
 			model: item.model,
-			tokens: item.tokens,
+			requestType: item.requestType,
+			value: item.requestType === "RERANK" ? item.searchUnits : item.tokens,
 			fill: `var(--color-${key})`,
 		};
 	});
@@ -138,6 +143,12 @@ export function AdminUsageDashboard({
 			{
 				accessorKey: "outputTokens",
 				header: "Output-Tokens",
+				cell: ({ getValue }) => numberFormatter.format(getValue<number>()),
+				sortingFn: "basic",
+			},
+			{
+				accessorKey: "searchUnits",
+				header: "Rerank-Suchen",
 				cell: ({ getValue }) => numberFormatter.format(getValue<number>()),
 				sortingFn: "basic",
 			},
@@ -202,12 +213,22 @@ export function AdminUsageDashboard({
 						</TabsList>
 					</Tabs>
 				</div>
-				<div className="rounded-none border border-border bg-card p-6">
-					<div className="text-muted-foreground text-xs uppercase tracking-wide">
-						Verbrauchte Tokens
+				<div className="grid gap-4 md:grid-cols-2">
+					<div className="rounded-none border border-border bg-card p-6">
+						<div className="text-muted-foreground text-xs uppercase tracking-wide">
+							Verbrauchte Tokens
+						</div>
+						<div className="mt-2 font-semibold text-3xl">
+							Verbrauchte Tokens: {numberFormatter.format(stats.totalTokens)}
+						</div>
 					</div>
-					<div className="mt-2 font-semibold text-3xl">
-						Verbrauchte Tokens: {numberFormatter.format(stats.totalTokens)}
+					<div className="rounded-none border border-border bg-card p-6">
+						<div className="text-muted-foreground text-xs uppercase tracking-wide">
+							Rerank-Suchen
+						</div>
+						<div className="mt-2 font-semibold text-3xl">
+							{numberFormatter.format(stats.totalSearchUnits)}
+						</div>
 					</div>
 				</div>
 			</div>
@@ -226,7 +247,7 @@ export function AdminUsageDashboard({
 									/>
 									<Pie
 										data={pieData}
-										dataKey="tokens"
+										dataKey="value"
 										innerRadius={60}
 										nameKey="key"
 										stroke="var(--background)"
