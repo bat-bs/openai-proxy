@@ -39,7 +39,9 @@ import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 
 type UsageModel = {
 	model: string;
+	requestType: string;
 	tokens: number;
+	searchUnits: number;
 };
 
 type UsageUser = {
@@ -48,11 +50,13 @@ type UsageUser = {
 	inputTokens: number;
 	cachedTokens: number;
 	outputTokens: number;
+	searchUnits: number;
 	lastActivity: string | null;
 };
 
 type UsageStats = {
 	totalTokens: number;
+	totalSearchUnits: number;
 	modelUsage: UsageModel[];
 	users: UsageUser[];
 };
@@ -96,23 +100,49 @@ export function AdminUsageDashboard({
 		setPagination((prev) => ({ ...prev, pageIndex: 0 }));
 	}, [stats.users.length]);
 
-	const pieData = stats.modelUsage.map((item, index) => {
-		const key = `model-${index}`;
-		return {
-			key,
-			model: item.model,
-			tokens: item.tokens,
-			fill: `var(--color-${key})`,
-		};
-	});
+	const chatPieData = stats.modelUsage
+		.filter((item) => item.requestType === "CHAT_COMPLETION")
+		.map((item, index) => {
+			const key = `model-${index}`;
+			return {
+				key,
+				model: item.model,
+				value: item.tokens,
+				fill: `var(--color-${key})`,
+			};
+		});
+	const rerankPieData = stats.modelUsage
+		.filter((item) => item.requestType === "RERANK")
+		.map((item, index) => {
+			const key = `rerank-model-${index}`;
+			return {
+				key,
+				model: item.model,
+				value: item.searchUnits,
+				fill: `var(--color-${key})`,
+			};
+		});
 
-	const chartConfig = pieData.reduce<ChartConfig>((acc, item, index) => {
-		acc[item.key] = {
-			label: item.model,
-			color: chartColors[index % chartColors.length],
-		};
-		return acc;
-	}, {});
+	const chatChartConfig = chatPieData.reduce<ChartConfig>(
+		(acc, item, index) => {
+			acc[item.key] = {
+				label: item.model,
+				color: chartColors[index % chartColors.length],
+			};
+			return acc;
+		},
+		{},
+	);
+	const rerankChartConfig = rerankPieData.reduce<ChartConfig>(
+		(acc, item, index) => {
+			acc[item.key] = {
+				label: item.model,
+				color: chartColors[index % chartColors.length],
+			};
+			return acc;
+		},
+		{},
+	);
 
 	const columns = useMemo<ColumnDef<UsageUser>[]>(
 		() => [
@@ -138,6 +168,12 @@ export function AdminUsageDashboard({
 			{
 				accessorKey: "outputTokens",
 				header: "Output-Tokens",
+				cell: ({ getValue }) => numberFormatter.format(getValue<number>()),
+				sortingFn: "basic",
+			},
+			{
+				accessorKey: "searchUnits",
+				header: "Rerank-Suchen",
 				cell: ({ getValue }) => numberFormatter.format(getValue<number>()),
 				sortingFn: "basic",
 			},
@@ -202,31 +238,41 @@ export function AdminUsageDashboard({
 						</TabsList>
 					</Tabs>
 				</div>
-				<div className="rounded-none border border-border bg-card p-6">
-					<div className="text-muted-foreground text-xs uppercase tracking-wide">
-						Verbrauchte Tokens
+				<div className="grid gap-4 md:grid-cols-2">
+					<div className="rounded-none border border-border bg-card p-6">
+						<div className="text-muted-foreground text-xs uppercase tracking-wide">
+							Verbrauchte Tokens
+						</div>
+						<div className="mt-2 font-semibold text-3xl">
+							Verbrauchte Tokens: {numberFormatter.format(stats.totalTokens)}
+						</div>
 					</div>
-					<div className="mt-2 font-semibold text-3xl">
-						Verbrauchte Tokens: {numberFormatter.format(stats.totalTokens)}
+					<div className="rounded-none border border-border bg-card p-6">
+						<div className="text-muted-foreground text-xs uppercase tracking-wide">
+							Rerank-Suchen
+						</div>
+						<div className="mt-2 font-semibold text-3xl">
+							{numberFormatter.format(stats.totalSearchUnits)}
+						</div>
 					</div>
 				</div>
 			</div>
 
-			<div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+			<div className="mt-6 grid gap-6 lg:grid-cols-2">
 				<div className="rounded-none border border-border bg-card p-4">
 					<div className="font-medium text-muted-foreground text-xs">
-						Nutzungsverteilung nach Modell
+						Chat-Nutzung nach Tokens
 					</div>
 					<div className="mt-4">
-						{pieData.length ? (
-							<ChartContainer className="h-72" config={chartConfig}>
+						{chatPieData.length ? (
+							<ChartContainer className="h-72" config={chatChartConfig}>
 								<PieChart>
 									<ChartTooltip
 										content={<ChartTooltipContent nameKey="key" />}
 									/>
 									<Pie
-										data={pieData}
-										dataKey="tokens"
+										data={chatPieData}
+										dataKey="value"
 										innerRadius={60}
 										nameKey="key"
 										stroke="var(--background)"
@@ -237,7 +283,37 @@ export function AdminUsageDashboard({
 							</ChartContainer>
 						) : (
 							<div className="text-muted-foreground text-xs">
-								Keine Nutzungsdaten für diesen Zeitraum.
+								Keine Chat-Nutzung für diesen Zeitraum.
+							</div>
+						)}
+					</div>
+				</div>
+
+				<div className="rounded-none border border-border bg-card p-4">
+					<div className="font-medium text-muted-foreground text-xs">
+						Rerank-Nutzung nach Search Units
+					</div>
+					<div className="mt-4">
+						{rerankPieData.length ? (
+							<ChartContainer className="h-72" config={rerankChartConfig}>
+								<PieChart>
+									<ChartTooltip
+										content={<ChartTooltipContent nameKey="key" />}
+									/>
+									<Pie
+										data={rerankPieData}
+										dataKey="value"
+										innerRadius={60}
+										nameKey="key"
+										stroke="var(--background)"
+										strokeWidth={2}
+									/>
+									<ChartLegend content={<ChartLegendContent nameKey="key" />} />
+								</PieChart>
+							</ChartContainer>
+						) : (
+							<div className="text-muted-foreground text-xs">
+								Keine Rerank-Nutzung für diesen Zeitraum.
 							</div>
 						)}
 					</div>

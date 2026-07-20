@@ -6,9 +6,12 @@ import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import {
+	addCurrencyTotal,
 	addResolvedTotalCost,
+	createCurrencyTotals,
 	createTotalCostAggregate,
-	mergeCurrency,
+	mergeCurrencyState,
+	presentCurrencyTotals,
 	presentTotalCost,
 	scaledCostToNumber,
 } from "~/server/costAggregation";
@@ -16,6 +19,7 @@ import {
 	buildCostStageIndex,
 	type CostStageRow,
 	resolveRequestCostStage,
+	resolveRerankCost,
 } from "~/server/costStageResolver";
 import { apikeys, costs, requests, users } from "~/server/db/schema";
 
@@ -57,6 +61,7 @@ export const apiKeyRouter = createTRPCRouter({
 				description: apikeys.description,
 				deactivated: apikeys.deactivated,
 				model: requests.model,
+				requestType: requests.requestType,
 				inputTokens:
 					sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
 						"inputTokens",
@@ -69,6 +74,9 @@ export const apiKeyRouter = createTRPCRouter({
 					sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
 						"outputTokens",
 					),
+				searchUnits: sql<number>`coalesce(sum(${requests.searchUnits}), 0)`.as(
+					"searchUnits",
+				),
 				createdAt: sql<string | null>`min(${requests.requestTime})`.as(
 					"createdAt",
 				),
@@ -82,6 +90,7 @@ export const apiKeyRouter = createTRPCRouter({
 				apikeys.description,
 				apikeys.deactivated,
 				requests.model,
+				requests.requestType,
 			);
 
 		// Fetch and index all pricing rows once; resolve cost per request afterwards.
@@ -90,6 +99,8 @@ export const apiKeyRouter = createTRPCRouter({
 				model: costs.model,
 				price: costs.price,
 				validFrom: costs.validFrom,
+				requestType: costs.requestType,
+				billingUnit: costs.billingUnit,
 				tokenType: costs.tokenType,
 				unitOfMessure: costs.unitOfMessure,
 				currency: costs.currency,
@@ -101,6 +112,8 @@ export const apiKeyRouter = createTRPCRouter({
 
 		const costStageRows: CostStageRow[] = costRows.map((row) => ({
 			model: row.model ?? "",
+			requestType: row.requestType,
+			billingUnit: row.billingUnit,
 			tokenType: row.tokenType ?? "",
 			price: Number(row.price ?? 0),
 			validFrom: row.validFrom ?? new Date(0),
@@ -127,6 +140,8 @@ export const apiKeyRouter = createTRPCRouter({
 				inputTokenCount: requests.inputTokenCount,
 				cachedInputTokenCount: requests.cachedInputTokenCount,
 				outputTokenCount: requests.outputTokenCount,
+				requestType: requests.requestType,
+				searchUnits: requests.searchUnits,
 			})
 			.from(requests)
 			.innerJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
@@ -141,99 +156,140 @@ export const apiKeyRouter = createTRPCRouter({
 			const inputTokenCount = Number(row.inputTokenCount ?? 0);
 			const cachedInputTokenCount = Number(row.cachedInputTokenCount ?? 0);
 			const outputTokenCount = Number(row.outputTokenCount ?? 0);
+			const searchUnits = Number(row.searchUnits ?? 0);
 
-			if (inputTokenCount + outputTokenCount <= 0) continue;
+			if (inputTokenCount + outputTokenCount + searchUnits <= 0) continue;
 
-			const resolved = resolveRequestCostStage(costStageIndex, {
-				model,
-				requestTime: new Date(row.requestTime),
-				inputTokenCount,
-				cachedInputTokenCount,
-				outputTokenCount,
-			});
+			const resolved =
+				row.requestType === "RERANK"
+					? (() => {
+							const rerank = resolveRerankCost(costStageRows, {
+								model,
+								requestTime: new Date(row.requestTime),
+								searchUnits,
+							});
+							return {
+								totalCost: rerank.cost,
+								currency: rerank.currency,
+								missing: rerank.missing,
+							};
+						})()
+					: resolveRequestCostStage(costStageIndex, {
+							model,
+							requestTime: new Date(row.requestTime),
+							inputTokenCount,
+							cachedInputTokenCount,
+							outputTokenCount,
+						});
 
-			const aggKey = `${row.apiKeyId}::${model}`;
+			const aggKey = `${row.apiKeyId}::${model}::${row.requestType}`;
 			const agg = costAggByKeyModel.get(aggKey) ?? createTotalCostAggregate();
 			addResolvedTotalCost(agg, resolved);
 
 			costAggByKeyModel.set(aggKey, agg);
 		}
 
-		const byKey = new Map<
-			string,
-			{
-				id: string;
-				description: string | null;
-				deactivated: boolean;
-				inputTokens: number;
-				cachedInputTokens: number;
-				outputTokens: number;
-				createdAt: string | null;
-				models: Array<{
-					model: string;
-					inputTokens: number;
-					cachedInputTokens: number;
-					outputTokens: number;
-					cost: number | null;
-					currency: string | null;
-				}>;
-				costScaled: bigint;
-				costMissing: boolean;
-				currency: string | null;
-			}
-		>();
+		type ApiKeyUsageModel = {
+			model: string;
+			requestType: string;
+			inputTokens: number;
+			cachedInputTokens: number;
+			outputTokens: number;
+			searchUnits: number;
+			cost: number | null;
+			currency: string | null;
+			currencyTotals: Array<{ currency: string; totalCost: number }>;
+		};
+		type ApiKeyUsageEntry = {
+			id: string;
+			description: string | null;
+			deactivated: boolean;
+			inputTokens: number;
+			cachedInputTokens: number;
+			outputTokens: number;
+			searchUnits: number;
+			createdAt: string | null;
+			models: ApiKeyUsageModel[];
+			costScaled: bigint;
+			costMissing: boolean;
+			currencyIssue: boolean;
+			currency: string | null;
+			currencyTotals: Map<string, bigint>;
+		};
+		const byKey = new Map<string, ApiKeyUsageEntry>();
 
 		for (const row of usageRows) {
 			const id = row.id;
-			const entry = byKey.get(id) ?? {
+			const entry: ApiKeyUsageEntry = byKey.get(id) ?? {
 				id,
 				description: row.description,
 				deactivated: row.deactivated,
 				inputTokens: 0,
 				cachedInputTokens: 0,
 				outputTokens: 0,
+				searchUnits: 0,
 				createdAt: row.createdAt ?? null,
 				models: [],
 				costScaled: 0n,
 				costMissing: false,
+				currencyIssue: false,
 				currency: null,
+				currencyTotals: createCurrencyTotals(),
 			};
 
 			const inputTokens = Number(row.inputTokens ?? 0);
 			const cachedInputTokens = Number(row.cachedInputTokens ?? 0);
 			const outputTokens = Number(row.outputTokens ?? 0);
+			const searchUnits = Number(row.searchUnits ?? 0);
 
 			entry.inputTokens += inputTokens;
 			entry.cachedInputTokens += cachedInputTokens;
 			entry.outputTokens += outputTokens;
+			entry.searchUnits += searchUnits;
 			if (!entry.createdAt) entry.createdAt = row.createdAt ?? null;
 
 			const model = row.model ?? "Unknown";
-			if (inputTokens + cachedInputTokens + outputTokens > 0) {
-				const aggKey = `${id}::${model}`;
+			const requestType = row.requestType ?? "CHAT_COMPLETION";
+			if (inputTokens + cachedInputTokens + outputTokens + searchUnits > 0) {
+				const aggKey = `${id}::${model}::${requestType}`;
 				const modelCostPresentation = presentTotalCost(
 					costAggByKeyModel.get(aggKey),
 				);
+				for (const currencyTotal of modelCostPresentation.currencyTotals) {
+					addCurrencyTotal(
+						entry.currencyTotals,
+						currencyTotal.currency,
+						currencyTotal.totalCost,
+					);
+				}
 
 				entry.models.push({
 					model,
+					requestType,
 					inputTokens,
 					cachedInputTokens,
 					outputTokens,
+					searchUnits,
 					cost: modelCostPresentation.cost,
 					currency: modelCostPresentation.currency,
+					currencyTotals: modelCostPresentation.currencyTotals,
 				});
 
 				const modelAgg = costAggByKeyModel.get(aggKey);
 				if (!modelAgg || modelCostPresentation.missing) {
 					entry.costMissing = true;
 					entry.currency = null;
+				} else if (modelCostPresentation.currencyIssue) {
+					entry.currencyIssue = true;
+					entry.currency = null;
 				} else {
 					entry.costScaled += modelAgg.totalCostScaled;
-					entry.currency = mergeCurrency(
+					const currencyState = mergeCurrencyState(
 						entry.currency,
 						modelCostPresentation.currency,
 					);
+					entry.currency = currencyState.currency;
+					entry.currencyIssue ||= currencyState.issue;
 				}
 			}
 
@@ -247,9 +303,16 @@ export const apiKeyRouter = createTRPCRouter({
 			inputTokens: row.inputTokens,
 			cachedInputTokens: row.cachedInputTokens,
 			outputTokens: row.outputTokens,
+			searchUnits: row.searchUnits,
 			createdAt: row.createdAt ?? null,
-			cost: row.costMissing ? null : scaledCostToNumber(row.costScaled),
-			currency: row.costMissing ? null : (row.currency ?? null),
+			cost:
+				row.costMissing || row.currencyIssue
+					? null
+					: scaledCostToNumber(row.costScaled),
+			currency:
+				row.costMissing || row.currencyIssue ? null : (row.currency ?? null),
+			currencyIssue: row.currencyIssue,
+			currencyTotals: presentCurrencyTotals(row.currencyTotals),
 			models: row.models.sort((a, b) => a.model.localeCompare(b.model)),
 		}));
 	}),

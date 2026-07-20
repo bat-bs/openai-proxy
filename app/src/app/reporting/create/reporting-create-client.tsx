@@ -56,9 +56,15 @@ type SortKey =
 	| "inputTokens"
 	| "cachedInputTokens"
 	| "outputTokens"
+	| "searchUnits"
 	| "totalCost";
 
 type SortState = { id: SortKey; direction: "asc" | "desc" } | null;
+
+type CumulativeCosts = {
+	currencies: string[];
+	points: Array<Record<string, number | string | null>>;
+};
 
 const timeframeOptions = [
 	{ value: "daily", label: "Täglich" },
@@ -186,11 +192,25 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 		const symbol = currency === "EUR" ? "€" : currency === "USD" ? "$" : "";
 		return `${costFormatter.format(value)}${symbol}`;
 	};
+	const formatCurrencyTotals = (
+		currencyTotals: Array<{ currency: string; totalCost: number }> | undefined,
+		fallbackCost: number | null,
+		fallbackCurrency: string | null,
+	) => {
+		if (!currencyTotals?.length)
+			return formatCost(fallbackCost, fallbackCurrency);
+		return currencyTotals
+			.map(({ currency, totalCost }) => formatCost(totalCost, currency))
+			.join(" · ");
+	};
 
 	const summary = report?.summary;
 	const modelUsage = report?.modelUsage ?? [];
 	const users = report?.users ?? [];
-	const cumulativeCosts = report?.cumulativeCosts ?? [];
+	const cumulativeCosts: CumulativeCosts = report?.cumulativeCosts ?? {
+		currencies: [],
+		points: [],
+	};
 	const hourlyTokens = report?.hourlyTokens ?? [];
 	const hourlyOutputByDay = report?.hourlyOutputByDay ?? [];
 	const costsUsed = report?.costsUsed ?? [];
@@ -214,6 +234,8 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 					return direction * (a.cachedInputTokens - b.cachedInputTokens);
 				case "outputTokens":
 					return direction * (a.outputTokens - b.outputTokens);
+				case "searchUnits":
+					return direction * (a.searchUnits - b.searchUnits);
 				case "totalCost":
 					return direction * ((a.totalCost ?? -1) - (b.totalCost ?? -1));
 				default:
@@ -244,30 +266,60 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 		});
 	};
 
-	const chartData = modelUsage.map((item, index) => {
-		const key = `model-${index}`;
-		return {
-			key,
-			model: item.model,
-			outputTokens: item.outputTokens,
-			fill: `var(--color-${key})`,
-		};
-	});
+	const chatChartData = modelUsage
+		.filter((item) => item.requestType === "CHAT_COMPLETION")
+		.map((item, index) => {
+			const key = `model-${index}`;
+			return {
+				key,
+				model: item.model,
+				value: item.outputTokens,
+				fill: `var(--color-${key})`,
+			};
+		});
+	const rerankChartData = modelUsage
+		.filter((item) => item.requestType === "RERANK")
+		.map((item, index) => {
+			const key = `rerank-model-${index}`;
+			return {
+				key,
+				model: item.model,
+				value: item.searchUnits,
+				fill: `var(--color-${key})`,
+			};
+		});
 
-	const chartConfig = chartData.reduce<ChartConfig>((acc, item, index) => {
-		acc[item.key] = {
-			label: item.model,
-			color: chartColors[index % chartColors.length],
-		};
-		return acc;
-	}, {});
-
-	const costChartConfig: ChartConfig = {
-		cumulativeCost: {
-			label: "Kumulierte Kosten",
-			color: chartColors[1],
+	const chatChartConfig = chatChartData.reduce<ChartConfig>(
+		(acc, item, index) => {
+			acc[item.key] = {
+				label: item.model,
+				color: chartColors[index % chartColors.length],
+			};
+			return acc;
 		},
-	};
+		{},
+	);
+	const rerankChartConfig = rerankChartData.reduce<ChartConfig>(
+		(acc, item, index) => {
+			acc[item.key] = {
+				label: item.model,
+				color: chartColors[index % chartColors.length],
+			};
+			return acc;
+		},
+		{},
+	);
+
+	const costChartConfig = cumulativeCosts.currencies.reduce<ChartConfig>(
+		(acc, currency, index) => {
+			acc[currency] = {
+				label: currency,
+				color: chartColors[index % chartColors.length],
+			};
+			return acc;
+		},
+		{},
+	);
 
 	const hourlyChartConfig: ChartConfig = {
 		avgTokens: {
@@ -308,7 +360,10 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 	);
 
 	const cumulativeCostAvailable = useMemo(
-		() => cumulativeCosts.some((item) => item.cumulativeCost !== null),
+		() =>
+			cumulativeCosts.points.some((item) =>
+				cumulativeCosts.currencies.some((currency) => item[currency] !== null),
+			),
 		[cumulativeCosts],
 	);
 
@@ -473,6 +528,12 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 									{numberFormatter.format(summary?.outputTokens ?? 0)}
 								</span>
 							</div>
+							<div>
+								<span className="text-muted-foreground">Rerank-Suchen:</span>{" "}
+								<span className="font-semibold">
+									{numberFormatter.format(summary?.searchUnits ?? 0)}
+								</span>
+							</div>
 						</div>
 					</div>
 					<div className="text-right">
@@ -480,10 +541,15 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 							Gesamtkosten
 						</div>
 						<div className="mt-2 font-semibold text-2xl">
-							{formatCost(
+							{formatCurrencyTotals(
+								summary?.currencyTotals,
 								summary?.totalCost ?? null,
-								summary?.currency ?? "EUR",
+								summary?.currency ?? null,
 							)}
+						</div>
+						<div className="mt-1 text-muted-foreground text-xs">
+							Chat-Kosten und Rerank-Kosten werden gemeinsam nach Währung
+							summiert.
 						</div>
 						{summary?.hasMissingCosts ? (
 							<div className="mt-1 text-muted-foreground text-xs">
@@ -502,18 +568,18 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 			<div className="grid gap-6 lg:grid-cols-2">
 				<div className="rounded-none border border-border bg-card p-4">
 					<div className="font-medium text-muted-foreground text-xs">
-						Modelle nach Output-Tokens
+						Chat-Modelle nach Output-Tokens
 					</div>
 					<div className="mt-4">
-						{chartData.length ? (
-							<ChartContainer className="h-72" config={chartConfig}>
+						{chatChartData.length ? (
+							<ChartContainer className="h-72" config={chatChartConfig}>
 								<PieChart>
 									<ChartTooltip
 										content={<ChartTooltipContent nameKey="key" />}
 									/>
 									<Pie
-										data={chartData}
-										dataKey="outputTokens"
+										data={chatChartData}
+										dataKey="value"
 										innerRadius={60}
 										nameKey="key"
 										stroke="var(--background)"
@@ -524,7 +590,37 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 							</ChartContainer>
 						) : (
 							<div className="text-muted-foreground text-xs">
-								Keine Modelle im ausgewählten Zeitraum.
+								Keine Chat-Nutzung im ausgewählten Zeitraum.
+							</div>
+						)}
+					</div>
+				</div>
+
+				<div className="rounded-none border border-border bg-card p-4">
+					<div className="font-medium text-muted-foreground text-xs">
+						Rerank-Modelle nach Search Units
+					</div>
+					<div className="mt-4">
+						{rerankChartData.length ? (
+							<ChartContainer className="h-72" config={rerankChartConfig}>
+								<PieChart>
+									<ChartTooltip
+										content={<ChartTooltipContent nameKey="key" />}
+									/>
+									<Pie
+										data={rerankChartData}
+										dataKey="value"
+										innerRadius={60}
+										nameKey="key"
+										stroke="var(--background)"
+										strokeWidth={2}
+									/>
+									<ChartLegend content={<ChartLegendContent nameKey="key" />} />
+								</PieChart>
+							</ChartContainer>
+						) : (
+							<div className="text-muted-foreground text-xs">
+								Keine Rerank-Nutzung im ausgewählten Zeitraum.
 							</div>
 						)}
 					</div>
@@ -537,7 +633,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 					<div className="mt-4">
 						{cumulativeCostAvailable ? (
 							<ChartContainer className="h-72" config={costChartConfig}>
-								<AreaChart data={cumulativeCosts}>
+								<AreaChart data={cumulativeCosts.points}>
 									<CartesianGrid strokeDasharray="4 4" />
 									<XAxis
 										dataKey="date"
@@ -555,13 +651,10 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 									<ChartTooltip
 										content={
 											<ChartTooltipContent
-												formatter={(value) =>
+												formatter={(value, name) =>
 													value === null
 														? "—"
-														: formatCost(
-																Number(value),
-																summary?.currency ?? "EUR",
-															)
+														: formatCost(Number(value), String(name))
 												}
 												labelFormatter={(value) =>
 													dateFormatter.format(new Date(value as string))
@@ -569,13 +662,16 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 											/>
 										}
 									/>
-									<Area
-										dataKey="cumulativeCost"
-										fill="var(--color-cumulativeCost)"
-										fillOpacity={0.2}
-										stroke="var(--color-cumulativeCost)"
-										type="monotone"
-									/>
+									{cumulativeCosts.currencies.map((currency, index) => (
+										<Area
+											dataKey={currency}
+											fill={chartColors[index % chartColors.length]}
+											fillOpacity={0.2}
+											key={currency}
+											stroke={chartColors[index % chartColors.length]}
+											type="monotone"
+										/>
+									))}
 								</AreaChart>
 							</ChartContainer>
 						) : (
@@ -693,7 +789,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 
 			<div className="rounded-none border border-border bg-card p-4">
 				<div className="font-medium text-muted-foreground text-xs">
-					Nutzung nach Benutzer
+					Chat- und Rerank-Nutzung nach Benutzer
 				</div>
 				<div className="mt-4">
 					<Table className="border-collapse text-xs">
@@ -739,6 +835,16 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 										Output-Tokens
 									</SortButton>
 								</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">
+									<SortButton
+										active={
+											sorting?.id === "searchUnits" ? sorting.direction : null
+										}
+										onClick={() => toggleSorting("searchUnits")}
+									>
+										Rerank-Suchen
+									</SortButton>
+								</TableHead>
 								<TableHead className="pr-3 pb-2 text-right font-medium">
 									<SortButton
 										active={
@@ -776,18 +882,25 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 										<TableCell className="py-2 pr-3">
 											{numberFormatter.format(user.outputTokens)}
 										</TableCell>
+										<TableCell className="py-2 pr-3">
+											{numberFormatter.format(user.searchUnits)}
+										</TableCell>
 										<TableCell className="py-2 pr-3 text-right">
-											{formatCost(user.totalCost, user.currency)}
+											{formatCurrencyTotals(
+												user.currencyTotals,
+												user.totalCost,
+												user.currency,
+											)}
 										</TableCell>
 									</TableRow>
 									{expandedUsers.has(user.id)
 										? user.models.map((model) => (
 												<TableRow
 													className="border-border/40 text-muted-foreground"
-													key={`${user.id}-${model.model}`}
+													key={`${user.id}-${model.model}-${model.requestType}`}
 												>
 													<TableCell className="py-1.5 pr-3 pl-6">
-														↳ {model.model}
+														↳ {model.model} ({model.requestType})
 													</TableCell>
 													<TableCell className="py-1.5 pr-3">
 														{numberFormatter.format(model.inputTokens)} (
@@ -801,8 +914,16 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 														{numberFormatter.format(model.outputTokens)} (
 														{formatCost(model.outputCost, model.currency)})
 													</TableCell>
+													<TableCell className="py-1.5 pr-3">
+														{numberFormatter.format(model.searchUnits)} (
+														{formatCost(model.searchCost, model.currency)})
+													</TableCell>
 													<TableCell className="py-1.5 pr-3 text-right">
-														{formatCost(model.totalCost, model.currency)}
+														{formatCurrencyTotals(
+															model.currencyTotals,
+															model.totalCost,
+															model.currency,
+														)}
 													</TableCell>
 												</TableRow>
 											))
@@ -813,7 +934,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 								<TableRow>
 									<TableCell
 										className="py-4 text-center text-muted-foreground"
-										colSpan={5}
+										colSpan={6}
 									>
 										Keine Benutzer gefunden.
 									</TableCell>
@@ -834,7 +955,10 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 							<TableRow className="border-border text-left text-[11px] text-muted-foreground uppercase tracking-wide">
 								<TableHead className="pr-3 pb-2 font-medium">Modell</TableHead>
 								<TableHead className="pr-3 pb-2 font-medium">
-									Token-Typ
+									Kostenart
+								</TableHead>
+								<TableHead className="pr-3 pb-2 font-medium">
+									Abrechnungseinheit
 								</TableHead>
 								<TableHead className="pr-3 pb-2 font-medium">Preis</TableHead>
 								<TableHead className="pr-3 pb-2 font-medium">Einheit</TableHead>
@@ -855,6 +979,9 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 									</TableCell>
 									<TableCell className="py-2 pr-3">{cost.tokenType}</TableCell>
 									<TableCell className="py-2 pr-3">
+										{cost.billingUnit}
+									</TableCell>
+									<TableCell className="py-2 pr-3">
 										{costFormatter.format(cost.price / 100)}
 									</TableCell>
 									<TableCell className="py-2 pr-3">
@@ -872,7 +999,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 								<TableRow>
 									<TableCell
 										className="py-4 text-center text-muted-foreground"
-										colSpan={6}
+										colSpan={7}
 									>
 										Keine Kostenbasis verfügbar.
 									</TableCell>

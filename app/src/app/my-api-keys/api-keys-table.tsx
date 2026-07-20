@@ -39,9 +39,13 @@ export type ApiKeyTableRow = {
 	inputTokens: number;
 	cachedInputTokens: number;
 	outputTokens: number;
+	searchUnits?: number;
+	requestType?: string;
 	createdAt?: string | null;
 	cost: number | null;
 	currency?: string | null;
+	currencyIssue?: boolean;
+	currencyTotals?: Array<{ currency: string; totalCost: number }>;
 	subRows?: ApiKeyTableRow[];
 };
 
@@ -71,6 +75,19 @@ function formatCost(value: number | null, currency?: string | null) {
 	if (value === null || Number.isNaN(value)) return "—";
 	const symbol = currency === "EUR" ? "€" : currency === "USD" ? "$" : "";
 	return `${costFormatter.format(value)}${symbol}`;
+}
+
+function formatCurrencyTotals(
+	currencyTotals: Array<{ currency: string; totalCost: number }> | undefined,
+	cost: number | null,
+	currency: string | null | undefined,
+) {
+	if (!currencyTotals?.length) return formatCost(cost, currency);
+	return currencyTotals
+		.map(({ currency: totalCurrency, totalCost }) =>
+			formatCost(totalCost, totalCurrency),
+		)
+		.join(" · ");
 }
 
 export function ApiKeysTable({
@@ -151,12 +168,26 @@ export function ApiKeysTable({
 				sortingFn: "basic",
 			},
 			{
+				accessorKey: "searchUnits",
+				header: "Rerank-Suchen",
+				cell: ({ getValue }) => formatNumber(getValue<number>()),
+				sortingFn: "basic",
+			},
+			{
 				accessorKey: "cost",
 				header: "Kosten",
 				cell: ({ row, getValue }) =>
 					row.original.kind === "model"
-						? formatCost(getValue<number | null>(), row.original.currency)
-						: formatCost(getValue<number | null>(), row.original.currency),
+						? formatCurrencyTotals(
+								row.original.currencyTotals,
+								getValue<number | null>(),
+								row.original.currency,
+							)
+						: formatCurrencyTotals(
+								row.original.currencyTotals,
+								getValue<number | null>(),
+								row.original.currency,
+							),
 				sortingFn: (rowA, rowB, columnId) => {
 					const a = rowA.getValue<number | null>(columnId) ?? 0;
 					const b = rowB.getValue<number | null>(columnId) ?? 0;
@@ -242,6 +273,8 @@ export function ApiKeysTable({
 				row.original.inputTokens,
 				row.original.cachedInputTokens,
 				row.original.outputTokens,
+				row.original.searchUnits ?? "",
+				row.original.requestType ?? "",
 				row.original.cost ?? "",
 				createdLabel,
 			]

@@ -1,5 +1,9 @@
 # Release Notes
 
+## Unreleased
+- Added separate chat-token and rerank-search reporting and dashboard charts.
+- Added request-type-aware rerank pricing management and filters.
+
 ## 1.0.0 - 2026-03-05
 - OpenAI-compatible API proxy for forwarding requests.
 - Web UI for creating, managing, and deactivating API keys.

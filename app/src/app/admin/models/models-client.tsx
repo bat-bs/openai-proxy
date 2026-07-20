@@ -14,16 +14,21 @@ import {
 } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Separator } from "~/components/ui/separator";
+import { ModelType, modelTypeOptions } from "~/lib/costs";
 import { api } from "~/trpc/react";
 
 export function ModelsClient() {
 	const utils = api.useUtils();
 	const { data: models = [], isLoading } = api.admin.listModels.useQuery();
 	const [modelId, setModelId] = useState("");
+	const [modelType, setModelType] = useState<ModelType>(
+		ModelType.ChatCompletion,
+	);
 
 	const addModel = api.admin.addModel.useMutation({
 		onSuccess: async () => {
 			setModelId("");
+			setModelType(ModelType.ChatCompletion);
 			await utils.admin.listModels.invalidate();
 			toast.success("Modell hinzugefügt.");
 		},
@@ -70,7 +75,7 @@ export function ModelsClient() {
 							onSubmit={(event) => {
 								event.preventDefault();
 								if (!canSubmit) return;
-								addModel.mutate({ modelId: trimmedModelId });
+								addModel.mutate({ modelId: trimmedModelId, modelType });
 							}}
 						>
 							<Input
@@ -80,6 +85,20 @@ export function ModelsClient() {
 								placeholder="gpt-4.1"
 								value={modelId}
 							/>
+							<select
+								className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+								disabled={isMutating}
+								onChange={(event) =>
+									setModelType(event.target.value as ModelType)
+								}
+								value={modelType}
+							>
+								{modelTypeOptions.map((value) => (
+									<option key={value} value={value}>
+										{value}
+									</option>
+								))}
+							</select>
 							<Button disabled={isMutating || !canSubmit} type="submit">
 								<Plus />
 								<span>Hinzufügen</span>
@@ -108,13 +127,15 @@ export function ModelsClient() {
 								{models.map((model) => (
 									<span
 										className="inline-flex items-center gap-2 rounded-none border border-border bg-muted px-3 py-1.5 text-sm"
-										key={model}
+										key={model.id}
 									>
-										<span className="max-w-[16rem] truncate">{model}</span>
+										<span className="max-w-[16rem] truncate">
+											{model.id} ({model.modelType})
+										</span>
 										<Button
-											aria-label={`Modell ${model} entfernen`}
+											aria-label={`Modell ${model.id} entfernen`}
 											disabled={isMutating}
-											onClick={() => deleteModel.mutate({ modelId: model })}
+											onClick={() => deleteModel.mutate({ modelId: model.id })}
 											size="icon-xs"
 											variant="ghost"
 										>

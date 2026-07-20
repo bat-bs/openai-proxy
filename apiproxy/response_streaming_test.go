@@ -3,6 +3,7 @@ package apiproxy
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -43,6 +44,27 @@ func TestNewResponse_SkipsStreamingBody(t *testing.T) {
 	}
 	if string(remaining) != sse {
 		t.Fatalf("expected body to remain unchanged, got: %q", string(remaining))
+	}
+}
+
+func TestNewResponse_SkipsUnsupportedListEndpoint(t *testing.T) {
+	bodyText := `{"object":"list","data":[]}`
+	resp := &http.Response{
+		Request: httptest.NewRequest(http.MethodGet, "https://example.local/openai/models", nil),
+		Header:  http.Header{"Content-Type": []string{"application/json"}},
+		Body:    io.NopCloser(strings.NewReader(bodyText)),
+	}
+
+	rc := &ResponseConf{db: nil}
+	if err := rc.NewResponse(resp); err != nil {
+		t.Fatalf("NewResponse returned unexpected error: %v", err)
+	}
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if string(got) != bodyText {
+		t.Fatalf("response body was consumed or changed: %q", got)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	db "openai-api-proxy/db"
-	"os"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -29,27 +28,50 @@ func CompareToken(hashes []db.ApiKey, apiKey string) (string, error) {
 }
 
 func (h *baseHandle) ValidateToken(w http.ResponseWriter, r *http.Request) string {
+	if !h.ValidateClientToken(w, r) {
+		return ""
+	}
+	return h.az.ApiKey
+}
+
+// ValidateClientToken authenticates the proxy API key without selecting an
+// upstream provider credential. Provider-specific handlers can then choose
+// the appropriate upstream authentication scheme.
+func (h *baseHandle) ValidateClientToken(w http.ResponseWriter, r *http.Request) bool {
+	_, ok := h.ValidateClientTokenID(w, r)
+	return ok
+}
+
+func (h *baseHandle) ValidateClientTokenID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if h.clientTokenValidator != nil {
+		if h.clientTokenValidator(w, r) {
+			return "test-api-key", true
+		}
+		return "", false
+	}
 	header := r.Header.Get(authHeader)
 
-	apiKey := strings.TrimPrefix(header, "Bearer ")
-	//fmt.Println("\"", apiKey, "\"")
-	if apiKey == "Bearer " {
+	if !strings.HasPrefix(header, "Bearer ") {
 		http.Error(w, "401 - Token Empty", http.StatusUnauthorized)
-
-		return ""
+		return "", false
+	}
+	apiKey := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+	if apiKey == "" {
+		http.Error(w, "401 - Token Empty", http.StatusUnauthorized)
+		return "", false
 	}
 
 	hashes, err := h.db.LookupApiKeys("*")
 	if err != nil || len(hashes) == 0 {
 		log.Println("Error while requesting API Keys from DB", err)
 		http.Error(w, "401 - Token Invalid", http.StatusUnauthorized)
-		return ""
+		return "", false
 	}
 
-	if _, err := CompareToken(hashes, apiKey); err != nil {
+	uid, err := CompareToken(hashes, apiKey)
+	if err != nil {
 		http.Error(w, "401 - Token Invalid", http.StatusUnauthorized)
-		return ""
+		return "", false
 	}
-	azureApiKey := os.Getenv("AZURE_API_KEY")
-	return azureApiKey
+	return uid, true
 }

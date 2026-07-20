@@ -4,18 +4,22 @@ import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import {
+	addCurrencyTotal,
 	addResolvedBreakdownCost,
 	addResolvedTotalCost,
 	createBreakdownCostAggregate,
+	createCurrencyTotals,
 	createTotalCostAggregate,
-	mergeCurrency,
+	mergeCurrencyState,
 	presentBreakdownCost,
+	presentCurrencyTotals,
 	scaledCostToNumber,
 } from "~/server/costAggregation";
 import {
 	buildCostStageIndex,
 	type CostStageRow,
 	resolveRequestCostStage,
+	resolveRerankCost,
 	tokenTypeLabelWithStage,
 } from "~/server/costStageResolver";
 import {
@@ -411,12 +415,15 @@ export const reportingRouter = createTRPCRouter({
 							inputTokens: 0,
 							cachedInputTokens: 0,
 							outputTokens: 0,
+							searchUnits: 0,
 							totalCost: 0,
 							currency: "EUR",
+							currencyTotals: [],
+							currencyIssue: false,
 						},
 						modelUsage: [],
 						users: [],
-						cumulativeCosts: [],
+						cumulativeCosts: { currencies: [], points: [] },
 						hourlyTokens: Array.from({ length: 24 }, (_, hour) => ({
 							hour,
 							avgTokens: 0,
@@ -432,6 +439,7 @@ export const reportingRouter = createTRPCRouter({
 					userId: users.id,
 					name: users.name,
 					model: requests.model,
+					requestType: requests.requestType,
 					inputTokens:
 						sql<number>`coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount}), 0)`.as(
 							"inputTokens",
@@ -444,6 +452,10 @@ export const reportingRouter = createTRPCRouter({
 						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
 							"outputTokens",
 						),
+					searchUnits:
+						sql<number>`coalesce(sum(${requests.searchUnits}), 0)`.as(
+							"searchUnits",
+						),
 				})
 				.from(users)
 				.leftJoin(apikeys, eq(apikeys.owner, users.id))
@@ -455,7 +467,7 @@ export const reportingRouter = createTRPCRouter({
 			const usageRows = await (scopedUserIds
 				? usersBase.where(inArray(users.id, scopedUserIds))
 				: usersBase
-			).groupBy(users.id, users.name, requests.model);
+			).groupBy(users.id, users.name, requests.model, requests.requestType);
 
 			const scopedConditions = [timeFilter];
 			if (scopedUserIds) {
@@ -474,6 +486,8 @@ export const reportingRouter = createTRPCRouter({
 					model: costs.model,
 					price: costs.price,
 					validFrom: costs.validFrom,
+					requestType: costs.requestType,
+					billingUnit: costs.billingUnit,
 					tokenType: costs.tokenType,
 					unitOfMessure: costs.unitOfMessure,
 					currency: costs.currency,
@@ -485,6 +499,8 @@ export const reportingRouter = createTRPCRouter({
 
 			const costStageRows: CostStageRow[] = costRows.map((row) => ({
 				model: row.model ?? "",
+				requestType: row.requestType,
+				billingUnit: row.billingUnit,
 				tokenType: row.tokenType ?? "",
 				price: Number(row.price ?? 0),
 				validFrom: row.validFrom ?? new Date(0),
@@ -503,6 +519,7 @@ export const reportingRouter = createTRPCRouter({
 				{
 					model: string;
 					tokenType: string;
+					billingUnit: "TOKENS" | "SEARCHES";
 					price: number;
 					unit: "1M" | "1K" | null;
 					currency: string | null;
@@ -530,6 +547,26 @@ export const reportingRouter = createTRPCRouter({
 				usedCosts.set(key, {
 					model: usedCost.model,
 					tokenType: tokenTypeLabel,
+					billingUnit: "TOKENS",
+					price: usedCost.price,
+					unit: usedCost.unitOfMessure as "1M" | "1K" | null,
+					currency: usedCost.currency
+						? usedCost.currency.trim().toUpperCase()
+						: null,
+					validFrom,
+				});
+			};
+
+			const registerUsedSearchCost = (usedCost: CostStageRow) => {
+				const validFrom = usedCost.validFrom
+					? new Date(usedCost.validFrom).toISOString().slice(0, 10)
+					: null;
+				const key = `${normalize(usedCost.model)}::SEARCHES::${validFrom}`;
+				if (usedCosts.has(key)) return;
+				usedCosts.set(key, {
+					model: usedCost.model,
+					tokenType: "searches",
+					billingUnit: "SEARCHES",
 					price: usedCost.price,
 					unit: usedCost.unitOfMessure as "1M" | "1K" | null,
 					currency: usedCost.currency
@@ -548,6 +585,7 @@ export const reportingRouter = createTRPCRouter({
 				string,
 				ReturnType<typeof createBreakdownCostAggregate>
 			>();
+			const reportCurrencyTotals = createCurrencyTotals();
 
 			const requestRowsForCost = await ctx.db
 				.select({
@@ -557,6 +595,8 @@ export const reportingRouter = createTRPCRouter({
 					inputTokenCount: requests.inputTokenCount,
 					cachedInputTokenCount: requests.cachedInputTokenCount,
 					outputTokenCount: requests.outputTokenCount,
+					requestType: requests.requestType,
+					searchUnits: requests.searchUnits,
 					bucket: costBucket.as("bucket"),
 				})
 				.from(requests)
@@ -573,22 +613,47 @@ export const reportingRouter = createTRPCRouter({
 				const inputTokenCount = Number(row.inputTokenCount ?? 0);
 				const cachedInputTokenCount = Number(row.cachedInputTokenCount ?? 0);
 				const outputTokenCount = Number(row.outputTokenCount ?? 0);
+				const searchUnits = Number(row.searchUnits ?? 0);
 
 				// Keep output stable: ignore requests that contain no billed tokens.
-				if (inputTokenCount + outputTokenCount <= 0) continue;
+				if (inputTokenCount + outputTokenCount + searchUnits <= 0) continue;
 
 				const bucketValue = row.bucket;
 				if (!bucketValue) continue;
 				const bucketDate = new Date(bucketValue);
 				const bucketKey = bucketDate.toISOString();
 
-				const resolved = resolveRequestCostStage(costStageIndex, {
-					model,
-					requestTime: new Date(row.requestTime),
-					inputTokenCount,
-					cachedInputTokenCount,
-					outputTokenCount,
-				});
+				const resolved =
+					row.requestType === "RERANK"
+						? (() => {
+								const rerank = resolveRerankCost(costStageRows, {
+									model,
+									requestTime: new Date(row.requestTime),
+									searchUnits,
+								});
+								return {
+									totalCost: rerank.cost,
+									currency: rerank.currency,
+									missing: rerank.missing,
+									inputCost: { cost: 0, usedCost: null },
+									cachedCost: { cost: 0, usedCost: null },
+									outputCost: { cost: 0, usedCost: null },
+									searchCost: { cost: rerank.cost, usedCost: rerank.usedCost },
+								};
+							})()
+						: (() => {
+								const chat = resolveRequestCostStage(costStageIndex, {
+									model,
+									requestTime: new Date(row.requestTime),
+									inputTokenCount,
+									cachedInputTokenCount,
+									outputTokenCount,
+								});
+								return {
+									...chat,
+									searchCost: { cost: 0, usedCost: null },
+								};
+							})();
 
 				const bucket = costBuckets.get(bucketKey) ?? {
 					date: bucketDate,
@@ -606,12 +671,15 @@ export const reportingRouter = createTRPCRouter({
 					if (resolved.outputCost.usedCost) {
 						registerUsedCost("output", resolved.outputCost.usedCost);
 					}
+					if (resolved.searchCost?.usedCost) {
+						registerUsedSearchCost(resolved.searchCost.usedCost);
+					}
 				}
 
 				costBuckets.set(bucketKey, bucket);
 
 				const userId = row.userId;
-				const userModelKey = `${userId}::${model}`;
+				const userModelKey = `${userId}::${model}::${row.requestType}`;
 				const agg =
 					costAggByUserModel.get(userModelKey) ??
 					createBreakdownCostAggregate();
@@ -620,24 +688,47 @@ export const reportingRouter = createTRPCRouter({
 				costAggByUserModel.set(userModelKey, agg);
 			}
 
-			const cumulativeCosts = Array.from(costBuckets.values())
-				.sort((a, b) => a.date.getTime() - b.date.getTime())
-				.map((bucket) => ({
-					date: bucket.date.toISOString(),
-					cost: bucket.missing
-						? null
-						: scaledCostToNumber(bucket.totalCostScaled),
-				}));
-
-			let runningCost = 0;
+			const cumulativeCosts = Array.from(costBuckets.values()).sort(
+				(a, b) => a.date.getTime() - b.date.getTime(),
+			);
+			const cumulativeCurrencies = Array.from(
+				new Set(
+					cumulativeCosts.flatMap((bucket) =>
+						presentCurrencyTotals(bucket.currencyTotals).map(
+							({ currency }) => currency,
+						),
+					),
+				),
+			).sort();
+			const runningCosts = new Map<string, number>();
 			let runningMissing = false;
-			const cumulativeCostSeries = cumulativeCosts.map((bucket) => {
-				if (runningMissing || bucket.cost === null) {
+			const cumulativeCostPoints = cumulativeCosts.map((bucket) => {
+				if (runningMissing || bucket.missing) {
 					runningMissing = true;
-					return { date: bucket.date, cumulativeCost: null };
+					return {
+						date: bucket.date.toISOString(),
+						...Object.fromEntries(
+							cumulativeCurrencies.map((currency) => [currency, null]),
+						),
+					};
 				}
-				runningCost += bucket.cost;
-				return { date: bucket.date, cumulativeCost: runningCost };
+				for (const { currency, totalCost } of presentCurrencyTotals(
+					bucket.currencyTotals,
+				)) {
+					runningCosts.set(
+						currency,
+						(runningCosts.get(currency) ?? 0) + totalCost,
+					);
+				}
+				return {
+					date: bucket.date.toISOString(),
+					...Object.fromEntries(
+						cumulativeCurrencies.map((currency) => [
+							currency,
+							runningCosts.get(currency) ?? 0,
+						]),
+					),
+				};
 			});
 
 			const hourBucket = sql<number>`extract(hour from ${requests.requestTime})`;
@@ -703,114 +794,204 @@ export const reportingRouter = createTRPCRouter({
 				}));
 			}).flat();
 
-			const usersMap = new Map<
+			type UserModel = {
+				model: string;
+				requestType: string;
+				inputTokens: number;
+				cachedInputTokens: number;
+				outputTokens: number;
+				searchUnits: number;
+				inputCost: number | null;
+				cachedCost: number | null;
+				outputCost: number | null;
+				searchCost: number | null;
+				totalCost: number | null;
+				currency: string | null;
+				currencyIssue: boolean;
+				currencyTotals: Array<{ currency: string; totalCost: number }>;
+			};
+			type UserEntry = {
+				id: string;
+				name: string;
+				inputTokens: number;
+				cachedInputTokens: number;
+				outputTokens: number;
+				searchUnits: number;
+				totalCostScaled: bigint;
+				totalCostHasKnownCost: boolean;
+				totalCostHasMissingCost: boolean;
+				currencyIssue: boolean;
+				currency: string | null;
+				currencyTotals: Map<string, bigint>;
+				models: UserModel[];
+			};
+			const usersMap = new Map<string, UserEntry>();
+
+			const modelTotals = new Map<
 				string,
 				{
-					id: string;
-					name: string;
-					inputTokens: number;
-					cachedInputTokens: number;
+					model: string;
+					requestType: string;
 					outputTokens: number;
-					totalCostScaled: bigint;
-					totalCostHasKnownCost: boolean;
-					totalCostHasMissingCost: boolean;
-					currency: string | null;
-					models: Array<{
-						model: string;
-						inputTokens: number;
-						cachedInputTokens: number;
-						outputTokens: number;
-						inputCost: number | null;
-						cachedCost: number | null;
-						outputCost: number | null;
-						totalCost: number | null;
-						currency: string | null;
-					}>;
+					searchUnits: number;
 				}
 			>();
-
-			const modelTotals = new Map<string, number>();
 			let totalInputTokens = 0;
 			let totalCachedTokens = 0;
 			let totalOutputTokens = 0;
+			let totalSearchUnits = 0;
 			let totalCostScaled = 0n;
 			let totalCostHasKnownCost = false;
 			let totalCostHasMissingCost = false;
+			let totalCurrencyIssue = false;
 			let totalCurrency: string | null = null;
 
 			for (const row of usageRows) {
 				const id = row.userId;
-				const entry = usersMap.get(id) ?? {
+				const entry: UserEntry = usersMap.get(id) ?? {
 					id,
 					name: row.name ?? id,
 					inputTokens: 0,
 					cachedInputTokens: 0,
 					outputTokens: 0,
+					searchUnits: 0,
 					totalCostScaled: 0n,
 					totalCostHasKnownCost: false,
 					totalCostHasMissingCost: false,
+					currencyIssue: false,
 					currency: null,
+					currencyTotals: createCurrencyTotals(),
 					models: [],
 				};
 
 				const inputTokens = Number(row.inputTokens ?? 0);
 				const cachedTokens = Number(row.cachedInputTokens ?? 0);
 				const outputTokens = Number(row.outputTokens ?? 0);
+				const searchUnits = Number(row.searchUnits ?? 0);
 
 				entry.inputTokens += inputTokens;
 				entry.cachedInputTokens += cachedTokens;
 				entry.outputTokens += outputTokens;
+				entry.searchUnits += searchUnits;
 
 				totalInputTokens += inputTokens;
 				totalCachedTokens += cachedTokens;
 				totalOutputTokens += outputTokens;
+				totalSearchUnits += searchUnits;
 
 				const model = row.model ?? null;
-				if (model && inputTokens + cachedTokens + outputTokens > 0) {
-					const userModelKey = `${id}::${model}`;
+				if (
+					model &&
+					inputTokens + cachedTokens + outputTokens + searchUnits > 0
+				) {
+					const userModelKey = `${id}::${model}::${row.requestType}`;
 					const agg = costAggByUserModel.get(userModelKey);
 					const modelCostPresentation = presentBreakdownCost(agg);
+					for (const currencyTotal of modelCostPresentation.currencyTotals) {
+						addCurrencyTotal(
+							entry.currencyTotals,
+							currencyTotal.currency,
+							currencyTotal.totalCost,
+						);
+						addCurrencyTotal(
+							reportCurrencyTotals,
+							currencyTotal.currency,
+							currencyTotal.totalCost,
+						);
+					}
 
-					modelTotals.set(model, (modelTotals.get(model) ?? 0) + outputTokens);
+					const modelTotalKey = `${model}::${row.requestType}`;
+					const modelTotal = modelTotals.get(modelTotalKey) ?? {
+						model,
+						requestType: row.requestType ?? "CHAT_COMPLETION",
+						outputTokens: 0,
+						searchUnits: 0,
+					};
+					modelTotal.outputTokens += outputTokens;
+					modelTotal.searchUnits += searchUnits;
+					modelTotals.set(modelTotalKey, modelTotal);
 
 					if (!agg || modelCostPresentation.missing) {
 						entry.models.push({
 							model,
+							requestType: row.requestType ?? "CHAT_COMPLETION",
 							inputTokens,
 							cachedInputTokens: cachedTokens,
 							outputTokens,
+							searchUnits,
 							inputCost: null,
 							cachedCost: null,
 							outputCost: null,
+							searchCost: null,
 							totalCost: null,
 							currency: null,
+							currencyIssue: false,
+							currencyTotals: modelCostPresentation.currencyTotals,
 						});
 						entry.totalCostHasMissingCost = true;
 						totalCostHasMissingCost = true;
+					} else if (modelCostPresentation.currencyIssue) {
+						entry.models.push({
+							model,
+							requestType: row.requestType ?? "CHAT_COMPLETION",
+							inputTokens,
+							cachedInputTokens: cachedTokens,
+							outputTokens,
+							searchUnits,
+							inputCost: null,
+							cachedCost: null,
+							outputCost: null,
+							searchCost: null,
+							totalCost: null,
+							currency: null,
+							currencyIssue: true,
+							currencyTotals: modelCostPresentation.currencyTotals,
+						});
+						entry.currencyIssue = true;
+						totalCurrencyIssue = true;
 					} else {
 						const modelCostScaled =
-							agg.inputCostScaled + agg.cachedCostScaled + agg.outputCostScaled;
+							agg.inputCostScaled +
+							agg.cachedCostScaled +
+							agg.outputCostScaled +
+							agg.searchCostScaled;
 						const modelCurrency = modelCostPresentation.currency;
 
 						entry.models.push({
 							model,
+							requestType: row.requestType ?? "CHAT_COMPLETION",
 							inputTokens,
 							cachedInputTokens: cachedTokens,
 							outputTokens,
+							searchUnits,
 							inputCost: modelCostPresentation.inputCost,
 							cachedCost: modelCostPresentation.cachedCost,
 							outputCost: modelCostPresentation.outputCost,
+							searchCost: modelCostPresentation.searchCost,
 							totalCost: modelCostPresentation.totalCost,
 							currency: modelCurrency,
+							currencyIssue: false,
+							currencyTotals: modelCostPresentation.currencyTotals,
 						});
 
 						entry.totalCostScaled += modelCostScaled;
 						entry.totalCostHasKnownCost = true;
-						entry.currency = mergeCurrency(entry.currency, modelCurrency);
+						const entryCurrencyState = mergeCurrencyState(
+							entry.currency,
+							modelCurrency,
+						);
+						entry.currency = entryCurrencyState.currency;
+						entry.currencyIssue ||= entryCurrencyState.issue;
+						if (entryCurrencyState.issue) totalCurrencyIssue = true;
 
 						totalCostScaled += modelCostScaled;
 						totalCostHasKnownCost = true;
-						totalCurrency = mergeCurrency(totalCurrency, modelCurrency);
+						const totalCurrencyState = mergeCurrencyState(
+							totalCurrency,
+							modelCurrency,
+						);
+						totalCurrency = totalCurrencyState.currency;
+						if (totalCurrencyState.issue) totalCurrencyIssue = true;
 					}
 				}
 
@@ -823,10 +1004,17 @@ export const reportingRouter = createTRPCRouter({
 				inputTokens: user.inputTokens,
 				cachedInputTokens: user.cachedInputTokens,
 				outputTokens: user.outputTokens,
-				totalCost: user.totalCostHasKnownCost
-					? scaledCostToNumber(user.totalCostScaled)
-					: null,
-				currency: user.totalCostHasKnownCost ? user.currency : null,
+				searchUnits: user.searchUnits,
+				totalCost:
+					user.totalCostHasKnownCost && !user.currencyIssue
+						? scaledCostToNumber(user.totalCostScaled)
+						: null,
+				currency:
+					user.totalCostHasKnownCost && !user.currencyIssue
+						? user.currency
+						: null,
+				currencyIssue: user.currencyIssue,
+				currencyTotals: presentCurrencyTotals(user.currencyTotals),
 				hasMissingCosts: user.totalCostHasMissingCost,
 				models: user.models.sort((a, b) => a.model.localeCompare(b.model)),
 			}));
@@ -842,20 +1030,32 @@ export const reportingRouter = createTRPCRouter({
 					inputTokens: totalInputTokens,
 					cachedInputTokens: totalCachedTokens,
 					outputTokens: totalOutputTokens,
-					totalCost: totalCostHasKnownCost
-						? scaledCostToNumber(totalCostScaled)
-						: null,
-					currency: totalCostHasKnownCost ? totalCurrency : null,
+					searchUnits: totalSearchUnits,
+					totalCost:
+						totalCostHasKnownCost && !totalCurrencyIssue
+							? scaledCostToNumber(totalCostScaled)
+							: null,
+					currency:
+						totalCostHasKnownCost && !totalCurrencyIssue ? totalCurrency : null,
+					currencyTotals: presentCurrencyTotals(reportCurrencyTotals),
 					hasMissingCosts: totalCostHasMissingCost,
+					currencyIssue: totalCurrencyIssue,
 				},
-				modelUsage: Array.from(modelTotals.entries())
-					.map(([model, outputTokens]) => ({
-						model,
-						outputTokens,
-					}))
-					.sort((a, b) => b.outputTokens - a.outputTokens),
+				modelUsage: Array.from(modelTotals.values()).sort((a, b) => {
+					if (a.requestType !== b.requestType) {
+						return a.requestType === "CHAT_COMPLETION" ? -1 : 1;
+					}
+					const aUsage =
+						a.requestType === "RERANK" ? a.searchUnits : a.outputTokens;
+					const bUsage =
+						b.requestType === "RERANK" ? b.searchUnits : b.outputTokens;
+					return bUsage - aUsage;
+				}),
 				users: usersData,
-				cumulativeCosts: cumulativeCostSeries,
+				cumulativeCosts: {
+					currencies: cumulativeCurrencies,
+					points: cumulativeCostPoints,
+				},
 				hourlyTokens,
 				hourlyOutputByDay,
 				costsUsed,

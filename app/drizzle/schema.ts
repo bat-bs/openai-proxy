@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
 	bigint,
 	boolean,
@@ -11,6 +12,7 @@ import {
 	primaryKey,
 	text,
 	timestamp,
+	uniqueIndex,
 	varchar,
 } from "drizzle-orm/pg-core";
 
@@ -50,6 +52,13 @@ export const company = pgTable("company", {
 	companyName: varchar("company_name", { length: 255 }).notNull(),
 });
 
+export const requestType = pgEnum("request_type", [
+	"CHAT_COMPLETION",
+	"RERANK",
+]);
+export const billingUnit = pgEnum("billing_unit", ["TOKENS", "SEARCHES"]);
+export const modelType = pgEnum("model_type", ["CHAT_COMPLETION", "RERANK"]);
+
 export const requests = pgTable(
 	"requests",
 	{
@@ -60,11 +69,11 @@ export const requests = pgTable(
 		}).defaultNow(),
 		model: varchar({ length: 255 }),
 		apiKeyId: varchar("api_key_id", { length: 255 }).notNull(),
-		inputTokenCount: integer("input_token_count").default(0).notNull(),
-		cachedInputTokenCount: integer("cached_input_token_count")
-			.default(0)
-			.notNull(),
-		outputTokenCount: integer("output_token_count").default(0).notNull(),
+		requestType: requestType("request_type").notNull(),
+		inputTokenCount: integer("input_token_count"),
+		cachedInputTokenCount: integer("cached_input_token_count"),
+		outputTokenCount: integer("output_token_count"),
+		searchUnits: integer("search_units"),
 		snapshotVersion: varchar("snapshot_version", { length: 255 }),
 		isApproximated: boolean("is_approximated").default(false).notNull(),
 	},
@@ -194,6 +203,7 @@ export const reportingGroupViewers = pgTable(
 
 export const models = pgTable("models", {
 	id: varchar({ length: 255 }).primaryKey().notNull(),
+	modelType: modelType("model_type").notNull(),
 });
 
 export const costUnit = pgEnum("cost_unit", ["1M", "1K"]);
@@ -213,14 +223,27 @@ export const costs = pgTable(
 		model: varchar({ length: 255 }).notNull(),
 		price: integer().notNull(),
 		validFrom: date("valid_from").defaultNow().notNull(),
-		tokenType: varchar("token_type", { length: 255 }).notNull(),
+		requestType: requestType("request_type").notNull(),
+		billingUnit: billingUnit("billing_unit").notNull(),
+		tokenType: varchar("token_type", { length: 255 }),
 		unitOfMessure: costUnit("unit_of_messure"),
-		isRegional: boolean("is_regional").notNull(),
-		backendName: varchar("backend_name", { length: 255 }).notNull(),
 		currency: char({ length: 3 }),
 		stageType: text("stage_type").notNull().default("context_length"),
 		stageMinTokens: integer("stage_min_tokens").notNull().default(0),
 		stageMaxTokens: integer("stage_max_tokens"),
 	},
-	(_table) => [],
+	(table) => [
+		uniqueIndex("costs_natural_key_idx").on(
+			table.model,
+			table.validFrom,
+			table.requestType,
+			table.billingUnit,
+			sql`COALESCE(${table.tokenType}, '')`,
+			table.unitOfMessure,
+			table.currency,
+			table.stageType,
+			table.stageMinTokens,
+			sql`COALESCE(${table.stageMaxTokens}, -1)`,
+		),
+	],
 );

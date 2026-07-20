@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -119,29 +120,105 @@ func (d *Database) DeleteEntry(key *string, uid string) {
 type Request struct {
 	ID                    string
 	ApiKeyID              string
-	TokenCountPrompt      int // Tokens of the Request (string) by the user
-	TokenCountComplete    int // Tokens of the Response from the API
-	InputTokenCount       int // Total input tokens (may include cached tokens)
-	CachedInputTokenCount int // Tokens already cached (subset of InputTokenCount)
-	OutputTokenCount      int // Output tokens (should match TokenCountComplete)
+	RequestType           string
+	TokenCountPrompt      *int // Tokens of the Request (string) by the user
+	TokenCountComplete    *int // Tokens of the Response from the API
+	InputTokenCount       *int // Total input tokens (may include cached tokens)
+	CachedInputTokenCount *int // Tokens already cached (subset of InputTokenCount)
+	OutputTokenCount      *int // Output tokens (should match TokenCountComplete)
+	SearchUnits           *int
 	Model                 string
 	SnapshotVersion       string
-	IsApproximated        bool // true if any token count (e.g., output) was estimated, not provided by API
+	IsApproximated        bool // true if any usage count was estimated, not provided by API
 }
+
+const (
+	RequestTypeChatCompletion = "CHAT_COMPLETION"
+	RequestTypeRerank         = "RERANK"
+	BillingUnitTokens         = "TOKENS"
+	BillingUnitSearches       = "SEARCHES"
+	ModelTypeChatCompletion   = "CHAT_COMPLETION"
+	ModelTypeRerank           = "RERANK"
+)
 
 func (d *Database) WriteRequest(r *Request) error {
 	_, err := d.db.Exec(`
 		INSERT INTO requests (
 			id, api_key_id,
-			input_token_count, cached_input_token_count, output_token_count,
+			request_type,
+			input_token_count, cached_input_token_count, output_token_count, search_units,
 			model, snapshot_version, is_approximated
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
 		r.ID, r.ApiKeyID,
-		r.InputTokenCount, r.CachedInputTokenCount, r.OutputTokenCount,
+		r.RequestType,
+		r.InputTokenCount, r.CachedInputTokenCount, r.OutputTokenCount, r.SearchUnits,
 		r.Model, nullOrString(r.SnapshotVersion), r.IsApproximated,
 	)
 	return err
+}
+
+// WriteRerankRequest records a Rerank usage row idempotently. A repeated write
+// for the same upstream ID is safe only when it describes the same request.
+func (d *Database) WriteRerankRequest(r *Request) error {
+	if strings.TrimSpace(r.ID) == "" {
+		return fmt.Errorf("rerank request ID is required")
+	}
+	result, err := d.db.Exec(`
+		INSERT INTO requests (
+			id, api_key_id, request_type, search_units, model, snapshot_version, is_approximated
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (id) DO NOTHING`,
+		r.ID, r.ApiKeyID, RequestTypeRerank, r.SearchUnits,
+		r.Model, nullOrString(r.SnapshotVersion), r.IsApproximated,
+	)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected > 0 {
+		return nil
+	}
+
+	var existing struct {
+		ApiKeyID       string
+		RequestType    string
+		SearchUnits    sql.NullInt64
+		Model          sql.NullString
+		IsApproximated bool
+	}
+	err = d.db.QueryRow(`
+		SELECT api_key_id, request_type, search_units, model, is_approximated
+		FROM requests WHERE id = $1`, r.ID).Scan(
+		&existing.ApiKeyID,
+		&existing.RequestType,
+		&existing.SearchUnits,
+		&existing.Model,
+		&existing.IsApproximated,
+	)
+	if err != nil {
+		return err
+	}
+	if existing.ApiKeyID != r.ApiKeyID ||
+		existing.RequestType != RequestTypeRerank ||
+		(existing.Model.Valid && existing.Model.String != r.Model) ||
+		(!existing.Model.Valid && r.Model != "") ||
+		existing.IsApproximated != r.IsApproximated ||
+		!nullableIntEqual(existing.SearchUnits, r.SearchUnits) {
+		return fmt.Errorf("rerank request ID %q already exists with different usage", r.ID)
+	}
+	return nil
+}
+
+func nullableIntEqual(existing sql.NullInt64, value *int) bool {
+	if value == nil {
+		return !existing.Valid
+	}
+	return existing.Valid && existing.Int64 == int64(*value)
 }
 
 func (d *Database) LookupApiKeyInfos(uid string) ([]ApiKey, error) {
@@ -192,6 +269,8 @@ type Costs struct {
 	ID            int64
 	ModelName     string
 	RetailPrice   int
+	RequestType   string
+	BillingUnit   string
 	TokenType     string
 	UnitOfMeasure string
 	Currency      string
@@ -218,24 +297,17 @@ func (d *Database) WriteCosts(carray []*Costs) error {
 		result, err := d.db.Exec(`
 		INSERT INTO costs
 		  (
-		    model, price, valid_from, token_type, unit_of_messure,
+		    model, price, valid_from, request_type, billing_unit, token_type, unit_of_messure,
 		    currency, stage_type, stage_min_tokens, stage_max_tokens
 		  )
 		VALUES
-		  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (
-		  model,
-		  valid_from,
-		  token_type,
-		  unit_of_messure,
-		  currency,
-		  stage_type,
-		  stage_min_tokens,
-		  (COALESCE(stage_max_tokens, -1))
-		) DO NOTHING`,
+		  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT DO NOTHING`,
 			c.ModelName,
 			c.RetailPrice,
 			validFrom,
+			defaultRequestType(c.RequestType),
+			defaultBillingUnit(c.BillingUnit),
 			c.TokenType,
 			c.UnitOfMeasure,
 			c.Currency,
@@ -244,7 +316,7 @@ func (d *Database) WriteCosts(carray []*Costs) error {
 			c.StageMaxTokens,
 		)
 		if err != nil {
-			log.Println(err)
+			return fmt.Errorf("write cost for %s: %w", c.ModelName, err)
 		}
 		if err == nil {
 			rowsAffected, rowsErr := result.RowsAffected()
@@ -255,6 +327,20 @@ func (d *Database) WriteCosts(carray []*Costs) error {
 	}
 	log.Println("Azure: Collecting Prices Done!")
 	return nil
+}
+
+func defaultRequestType(requestType string) string {
+	if strings.TrimSpace(requestType) == "" {
+		return RequestTypeChatCompletion
+	}
+	return requestType
+}
+
+func defaultBillingUnit(billingUnit string) string {
+	if strings.TrimSpace(billingUnit) == "" {
+		return BillingUnitTokens
+	}
+	return billingUnit
 }
 
 func (d *Database) LookupModels() []string {
@@ -295,8 +381,41 @@ func (d *Database) ListConfiguredModels() ([]string, error) {
 	return models, nil
 }
 
+type ConfiguredModel struct {
+	ID        string
+	ModelType string
+}
+
+func (d *Database) LookupConfiguredModelType(id string) (string, bool, error) {
+	var modelType string
+	err := d.db.QueryRow(
+		`SELECT model_type FROM models WHERE lower(id) = lower($1)`,
+		id,
+	).Scan(&modelType)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return modelType, true, nil
+}
+
+func (d *Database) AddConfiguredModelWithType(id, modelType string) error {
+	_, err := d.db.Exec(
+		`INSERT INTO models (id, model_type) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		id,
+		modelType,
+	)
+	return err
+}
+
 func (d *Database) AddConfiguredModel(id string) error {
-	_, err := d.db.Exec(`INSERT INTO models (id) VALUES ($1) ON CONFLICT DO NOTHING`, id)
+	_, err := d.db.Exec(
+		`INSERT INTO models (id, model_type) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		id,
+		ModelTypeChatCompletion,
+	)
 	return err
 }
 
@@ -317,6 +436,8 @@ type RequestSummary struct {
 	InputTokenCount       int
 	CachedInputTokenCount int
 	OutputTokenCount      int
+	SearchUnits           int
+	RequestType           string
 	CacheRatioPercent     float64
 }
 
@@ -327,6 +448,8 @@ func (d *Database) LookupCosts(model string) (carray []Costs) {
 			model,
 			price,
 			valid_from,
+			request_type,
+			billing_unit,
 			token_type,
 			unit_of_messure,
 			currency,
@@ -341,14 +464,16 @@ func (d *Database) LookupCosts(model string) (carray []Costs) {
 
 	var c Costs
 	for rows.Next() {
-		var currency sql.NullString
+		var currency, requestType, billingUnit, tokenType sql.NullString
 		var stageMax sql.NullInt64
 		if err := rows.Scan(
 			&c.ID,
 			&c.ModelName,
 			&c.RetailPrice,
 			&c.RequestTime,
-			&c.TokenType,
+			&requestType,
+			&billingUnit,
+			&tokenType,
 			&c.UnitOfMeasure,
 			&currency,
 			&c.StageType,
@@ -358,6 +483,9 @@ func (d *Database) LookupCosts(model string) (carray []Costs) {
 			log.Println("DB Error for looking up costs: ", err)
 			return carray
 		}
+		c.RequestType = requestType.String
+		c.BillingUnit = billingUnit.String
+		c.TokenType = tokenType.String
 		if currency.Valid {
 			c.Currency = currency.String
 		} else {
@@ -452,6 +580,8 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string,
 			r.model,
 			COALESCE(SUM(r.input_token_count), 0) - COALESCE(SUM(r.cached_input_token_count), 0),
 			COALESCE(SUM(r.output_token_count), 0),
+			COALESCE(SUM(r.search_units), 0),
+			r.request_type,
 			date_trunc('%[2]s', r.request_time) AS rq_time
 		FROM requests r
 		INNER JOIN apikeys a ON a.UUID = r.api_key_id 
@@ -459,7 +589,7 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string,
 		WHERE 
 			%[1]s = $1
 			AND %[3]s
-		GROUP BY %[1]s, r.model, rq_time
+		GROUP BY %[1]s, r.model, r.request_type, rq_time
 		ORDER BY rq_time;`,
 		kind, dateTrunc, condition)
 	rows, err := d.db.Query(query, uid)
@@ -469,7 +599,7 @@ func (d *Database) LookupApiKeyUserStats(uid string, kind string, filter string,
 	var summary []RequestSummary
 	for rows.Next() {
 		var rq RequestSummary
-		if err := rows.Scan(&rq.ID, &rq.Model, &rq.TokenCountPrompt, &rq.TokenCountComplete, &rq.RequestTime); err != nil {
+		if err := rows.Scan(&rq.ID, &rq.Model, &rq.TokenCountPrompt, &rq.TokenCountComplete, &rq.SearchUnits, &rq.RequestType, &rq.RequestTime); err != nil {
 			return summary, err
 		}
 		summary = append(summary, rq)
@@ -520,6 +650,8 @@ func (d *Database) LookupApiKeyUserRequests(uid string, kind string, filter stri
 			COALESCE(r.input_token_count, 0),
 			COALESCE(r.cached_input_token_count, 0),
 			COALESCE(r.output_token_count, 0),
+			COALESCE(r.search_units, 0),
+			r.request_type,
 			r.request_time
 		FROM requests r
 		INNER JOIN apikeys a ON a.UUID = r.api_key_id
@@ -545,6 +677,8 @@ func (d *Database) LookupApiKeyUserRequests(uid string, kind string, filter stri
 			&rq.InputTokenCount,
 			&rq.CachedInputTokenCount,
 			&rq.OutputTokenCount,
+			&rq.SearchUnits,
+			&rq.RequestType,
 			&rq.RequestTime,
 		); err != nil {
 			return summary, err
@@ -572,6 +706,7 @@ func (d *Database) LookupApiKeyUserOverview() ([]RequestSummary, error) {
 				COALESCE(SUM(r.input_token_count), 0),
 				COALESCE(SUM(r.cached_input_token_count), 0),
 				COALESCE(SUM(r.output_token_count), 0)
+				,COALESCE(SUM(r.search_units), 0)
 			FROM apiKeys a
 			LEFT JOIN users u on a.Owner = u.id 
 			LEFT JOIN requests r ON a.UUID = r.api_key_id
@@ -587,7 +722,7 @@ func (d *Database) LookupApiKeyUserOverview() ([]RequestSummary, error) {
 	for rows.Next() {
 		var rq RequestSummary
 		var inputTotal, cachedTotal, outputTotal sql.NullInt64
-		if err := rows.Scan(&rq.Name, &rq.ID, &inputTotal, &cachedTotal, &outputTotal); err != nil {
+		if err := rows.Scan(&rq.Name, &rq.ID, &inputTotal, &cachedTotal, &outputTotal, &rq.SearchUnits); err != nil {
 			return summary, err
 		}
 		in := int(inputTotal.Int64)

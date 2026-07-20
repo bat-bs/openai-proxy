@@ -84,7 +84,7 @@ func TestNewResponse_SSENestedUsage(t *testing.T) {
 		t.Fatalf("expected 1 DB write, got %d; logs:\n%s", len(fb.writes), out)
 	}
 	w := fb.writes[0]
-	if w.ID != "r1" || w.TokenCountPrompt != 11 || w.TokenCountComplete != 22 {
+	if w.ID != "r1" || intValue(w.TokenCountPrompt) != 11 || intValue(w.TokenCountComplete) != 22 {
 		t.Fatalf("unexpected DB write: %+v; logs:\n%s", w, out)
 	}
 }
@@ -130,7 +130,7 @@ func TestNewResponse_SSEOverlongLineDoesNotAbortStream(t *testing.T) {
 		t.Fatalf("expected 1 DB write, got %d", len(fb.writes))
 	}
 	w := fb.writes[0]
-	if w.ID != "r-long" || w.TokenCountPrompt != 3 || w.TokenCountComplete != 4 {
+	if w.ID != "r-long" || intValue(w.TokenCountPrompt) != 3 || intValue(w.TokenCountComplete) != 4 {
 		t.Fatalf("unexpected DB write: %+v", w)
 	}
 }
@@ -184,10 +184,10 @@ func TestNewResponse_SSEOverCapEventApproximatesCompletionTokens(t *testing.T) {
 	if !w.IsApproximated {
 		t.Fatalf("expected approximated request, got %+v", w)
 	}
-	if w.TokenCountComplete <= 0 {
+	if intValue(w.TokenCountComplete) <= 0 {
 		t.Fatalf("expected approximated completion tokens > 0, got %+v", w)
 	}
-	if w.TokenCountComplete == 999 {
+	if intValue(w.TokenCountComplete) == 999 {
 		t.Fatalf("expected oversized event usage to be ignored under cap, got %+v", w)
 	}
 }
@@ -237,15 +237,22 @@ func TestNewResponse_ChatCompletionStoresInputTokens(t *testing.T) {
 	}
 
 	w := fb.writes[0]
-	if w.InputTokenCount != 23 {
-		t.Fatalf("expected input tokens 23, got %d", w.InputTokenCount)
+	if intValue(w.InputTokenCount) != 23 {
+		t.Fatalf("expected input tokens 23, got %d", intValue(w.InputTokenCount))
 	}
-	if w.CachedInputTokenCount != 0 {
-		t.Fatalf("expected cached input tokens 0, got %d", w.CachedInputTokenCount)
+	if intValue(w.CachedInputTokenCount) != 0 {
+		t.Fatalf("expected cached input tokens 0, got %d", intValue(w.CachedInputTokenCount))
 	}
-	if w.OutputTokenCount != 200 {
-		t.Fatalf("expected output tokens 200, got %d", w.OutputTokenCount)
+	if intValue(w.OutputTokenCount) != 200 {
+		t.Fatalf("expected output tokens 200, got %d", intValue(w.OutputTokenCount))
 	}
+}
+
+func intValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 // fake DB implementation for test
