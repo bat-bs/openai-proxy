@@ -295,22 +295,31 @@ function CostEditDialog({
 								value={model}
 							/>
 						</div>
-						<div className="flex flex-col gap-1">
-							<label
-								className="font-medium text-muted-foreground text-xs"
-								htmlFor={`costs-token-${fieldKey}`}
-							>
-								Token-Typ
-							</label>
-							<Input
-								id={`costs-token-${fieldKey}`}
-								onChange={(event) => setTokenType(event.target.value)}
-								placeholder={
-									requestType === "RERANK" ? "(nicht erforderlich)" : "input"
-								}
-								value={tokenType}
-							/>
-						</div>
+						{requestType === "RERANK" ? (
+							<div className="flex flex-col gap-1">
+								<span className="font-medium text-muted-foreground text-xs">
+									Token-Typ
+								</span>
+								<span className="text-muted-foreground text-sm">
+									Nicht anwendbar
+								</span>
+							</div>
+						) : (
+							<div className="flex flex-col gap-1">
+								<label
+									className="font-medium text-muted-foreground text-xs"
+									htmlFor={`costs-token-${fieldKey}`}
+								>
+									Token-Typ
+								</label>
+								<Input
+									id={`costs-token-${fieldKey}`}
+									onChange={(event) => setTokenType(event.target.value)}
+									placeholder={"input"}
+									value={tokenType}
+								/>
+							</div>
+						)}
 						<div className="flex flex-col gap-1">
 							<label
 								className="font-medium text-muted-foreground text-xs"
@@ -459,9 +468,13 @@ function CostEditDialog({
 										requestType === "RERANK" ? null : tokenType.trim() || null,
 									unitOfMessure: unitOfMessure ?? null,
 									currency: currency.trim() || null,
-									stageType,
-									stageMinTokens,
-									stageMaxTokens: stageMaxTokensValue,
+									stageType:
+										requestType === "RERANK"
+											? CostStageType.ContextLength
+											: stageType,
+									stageMinTokens: requestType === "RERANK" ? 0 : stageMinTokens,
+									stageMaxTokens:
+										requestType === "RERANK" ? null : stageMaxTokensValue,
 								};
 
 								if (mode === "update") {
@@ -502,6 +515,9 @@ export function CostsTable({
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [globalFilter, setGlobalFilter] = useState("");
 	const [modelFilter, setModelFilter] = useState("");
+	const [requestTypeFilter, setRequestTypeFilter] = useState<
+		"ALL" | RequestType
+	>("ALL");
 	const [tokenFilter, setTokenFilter] = useState("");
 	const [currencyFilter, setCurrencyFilter] = useState("");
 	const [pagination, setPagination] = useState({
@@ -512,6 +528,12 @@ export function CostsTable({
 	const filteredData = useMemo(() => {
 		const search = globalFilter.trim().toLowerCase();
 		return data.filter((row) => {
+			if (
+				requestTypeFilter !== "ALL" &&
+				row.requestType !== requestTypeFilter
+			) {
+				return false;
+			}
 			if (
 				modelFilter &&
 				!row.model.toLowerCase().includes(modelFilter.toLowerCase())
@@ -548,7 +570,14 @@ export function CostsTable({
 				.map((value) => String(value).toLowerCase())
 				.some((value) => value.includes(search));
 		});
-	}, [currencyFilter, data, globalFilter, modelFilter, tokenFilter]);
+	}, [
+		currencyFilter,
+		data,
+		globalFilter,
+		modelFilter,
+		requestTypeFilter,
+		tokenFilter,
+	]);
 
 	const columns = useMemo<ColumnDef<CostRow>[]>(
 		() => [
@@ -647,7 +676,14 @@ export function CostsTable({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reset pagination when filters change.
 	useEffect(() => {
 		setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-	}, [globalFilter, modelFilter, tokenFilter, currencyFilter, data.length]);
+	}, [
+		globalFilter,
+		modelFilter,
+		requestTypeFilter,
+		tokenFilter,
+		currencyFilter,
+		data.length,
+	]);
 
 	const totalRows = table.getFilteredRowModel().rows.length;
 	const startRow =
@@ -671,7 +707,7 @@ export function CostsTable({
 						{totalRows} Einträge
 					</div>
 				</div>
-				<div className="grid gap-2 md:grid-cols-5">
+				<div className="grid gap-2 md:grid-cols-6">
 					<Input
 						onChange={(event) => setGlobalFilter(event.target.value)}
 						placeholder="Suche"
@@ -682,6 +718,22 @@ export function CostsTable({
 						placeholder="Modell"
 						value={modelFilter}
 					/>
+					<NativeSelect
+						aria-label="Request-Typ"
+						onChange={(event) =>
+							setRequestTypeFilter(event.target.value as "ALL" | RequestType)
+						}
+						value={requestTypeFilter}
+					>
+						<NativeSelectOption value="ALL">
+							Alle Request-Typen
+						</NativeSelectOption>
+						{requestTypeOptions.map((value) => (
+							<NativeSelectOption key={value} value={value}>
+								{value}
+							</NativeSelectOption>
+						))}
+					</NativeSelect>
 					<Input
 						onChange={(event) => setTokenFilter(event.target.value)}
 						placeholder="Token-Typ"
@@ -693,12 +745,17 @@ export function CostsTable({
 						value={currencyFilter}
 					/>
 				</div>
-				{globalFilter || modelFilter || tokenFilter || currencyFilter ? (
+				{globalFilter ||
+				modelFilter ||
+				requestTypeFilter !== "ALL" ||
+				tokenFilter ||
+				currencyFilter ? (
 					<div>
 						<Button
 							onClick={() => {
 								setGlobalFilter("");
 								setModelFilter("");
+								setRequestTypeFilter("ALL");
 								setTokenFilter("");
 								setCurrencyFilter("");
 							}}

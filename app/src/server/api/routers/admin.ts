@@ -184,7 +184,16 @@ export const adminRouter = createTRPCRouter({
 						searchUnits: Number(row.searchUnits ?? 0),
 					}))
 					.filter((row) => row.tokens > 0 || row.searchUnits > 0)
-					.sort((a, b) => b.tokens - a.tokens),
+					.sort((a, b) => {
+						if (a.requestType !== b.requestType) {
+							return a.requestType === RequestType.ChatCompletion ? -1 : 1;
+						}
+						const aUsage =
+							a.requestType === RequestType.Rerank ? a.searchUnits : a.tokens;
+						const bUsage =
+							b.requestType === RequestType.Rerank ? b.searchUnits : b.tokens;
+						return bUsage - aUsage;
+					}),
 				users: userRows.map((row) => ({
 					id: row.id,
 					name: row.name ?? row.id,

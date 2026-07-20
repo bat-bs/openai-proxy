@@ -153,3 +153,46 @@ test("breakdown keeps search costs in the currency total", () => {
 		{ currency: "USD", totalCost: 0.002 },
 	]);
 });
+
+test("rerank breakdown keeps search cost separate from token costs", () => {
+	const aggregate = createBreakdownCostAggregate();
+	addResolvedBreakdownCost(aggregate, {
+		missing: false,
+		currency: "USD",
+		inputCost: { cost: 0 },
+		cachedCost: { cost: 0 },
+		outputCost: { cost: 0 },
+		searchCost: { cost: 2.5 },
+	});
+
+	assert.deepEqual(presentBreakdownCost(aggregate), {
+		missing: false,
+		currencyIssue: false,
+		inputCost: 0,
+		cachedCost: 0,
+		outputCost: 0,
+		searchCost: 2.5,
+		totalCost: 2.5,
+		currency: "USD",
+		currencyTotals: [{ currency: "USD", totalCost: 2.5 }],
+	});
+});
+
+test("mixed token and search costs preserve their separate breakdowns", () => {
+	const aggregate = createBreakdownCostAggregate();
+	addResolvedBreakdownCost(aggregate, {
+		missing: false,
+		currency: "EUR",
+		inputCost: { cost: 1 },
+		cachedCost: { cost: 2 },
+		outputCost: { cost: 3 },
+		searchCost: { cost: 4 },
+	});
+
+	const result = presentBreakdownCost(aggregate);
+	assert.equal(result.totalCost, 10);
+	assert.equal(result.inputCost, 1);
+	assert.equal(result.cachedCost, 2);
+	assert.equal(result.outputCost, 3);
+	assert.equal(result.searchCost, 4);
+});

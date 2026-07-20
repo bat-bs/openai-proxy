@@ -100,7 +100,7 @@ export function CostsClient() {
 		stageMaxTokensValue === null || !Number.isNaN(stageMaxTokensValue);
 	const canSubmit =
 		model.trim().length > 0 &&
-		tokenType.trim().length > 0 &&
+		(requestType === RequestType.Rerank || tokenType.trim().length > 0) &&
 		!Number.isNaN(priceValue) &&
 		stageMaxTokensValid;
 
@@ -138,20 +138,31 @@ export function CostsClient() {
 									value={model}
 								/>
 							</div>
-							<div className="flex flex-col gap-1">
-								<label
-									className="font-medium text-muted-foreground text-xs"
-									htmlFor="costs-create-token-type"
-								>
-									Token-Typ
-								</label>
-								<Input
-									id="costs-create-token-type"
-									onChange={(event) => setTokenType(event.target.value)}
-									placeholder="input"
-									value={tokenType}
-								/>
-							</div>
+							{requestType === RequestType.Rerank ? (
+								<div className="flex flex-col gap-1">
+									<span className="font-medium text-muted-foreground text-xs">
+										Token-Typ
+									</span>
+									<span className="text-muted-foreground text-sm">
+										Nicht anwendbar
+									</span>
+								</div>
+							) : (
+								<div className="flex flex-col gap-1">
+									<label
+										className="font-medium text-muted-foreground text-xs"
+										htmlFor="costs-create-token-type"
+									>
+										Token-Typ
+									</label>
+									<Input
+										id="costs-create-token-type"
+										onChange={(event) => setTokenType(event.target.value)}
+										placeholder="input"
+										value={tokenType}
+									/>
+								</div>
+							)}
 							<div className="flex flex-col gap-1">
 								<label
 									className="font-medium text-muted-foreground text-xs"
@@ -281,65 +292,67 @@ export function CostsClient() {
 							</div>
 						</div>
 
-						<div className="mt-4 grid gap-3 md:grid-cols-3">
-							<div className="flex flex-col gap-1">
-								<label
-									className="font-medium text-muted-foreground text-xs"
-									htmlFor="costs-create-stage-type"
-								>
-									Stage Typ
-								</label>
-								<NativeSelect
-									className="w-full"
-									id="costs-create-stage-type"
-									onChange={(event) =>
-										setStageType(event.target.value as CostStageType)
-									}
-									value={stageType}
-								>
-									{costStageTypeOptions.map((stage) => (
-										<NativeSelectOption key={stage} value={stage}>
-											{stage}
-										</NativeSelectOption>
-									))}
-								</NativeSelect>
+						{requestType !== RequestType.Rerank ? (
+							<div className="mt-4 grid gap-3 md:grid-cols-3">
+								<div className="flex flex-col gap-1">
+									<label
+										className="font-medium text-muted-foreground text-xs"
+										htmlFor="costs-create-stage-type"
+									>
+										Stage Typ
+									</label>
+									<NativeSelect
+										className="w-full"
+										id="costs-create-stage-type"
+										onChange={(event) =>
+											setStageType(event.target.value as CostStageType)
+										}
+										value={stageType}
+									>
+										{costStageTypeOptions.map((stage) => (
+											<NativeSelectOption key={stage} value={stage}>
+												{stage}
+											</NativeSelectOption>
+										))}
+									</NativeSelect>
+								</div>
+								<div className="flex flex-col gap-1">
+									<label
+										className="font-medium text-muted-foreground text-xs"
+										htmlFor="costs-create-stage-min"
+									>
+										Stage Min Tokens
+									</label>
+									<Input
+										id="costs-create-stage-min"
+										min={0}
+										onChange={(event) =>
+											setStageMinTokens(
+												Number.parseInt(event.target.value || "0", 10),
+											)
+										}
+										type="number"
+										value={String(stageMinTokens)}
+									/>
+								</div>
+								<div className="flex flex-col gap-1">
+									<label
+										className="font-medium text-muted-foreground text-xs"
+										htmlFor="costs-create-stage-max"
+									>
+										Stage Max Tokens
+									</label>
+									<Input
+										id="costs-create-stage-max"
+										min={0}
+										onChange={(event) => setStageMaxTokens(event.target.value)}
+										placeholder="(optional)"
+										type="number"
+										value={stageMaxTokens}
+									/>
+								</div>
 							</div>
-							<div className="flex flex-col gap-1">
-								<label
-									className="font-medium text-muted-foreground text-xs"
-									htmlFor="costs-create-stage-min"
-								>
-									Stage Min Tokens
-								</label>
-								<Input
-									id="costs-create-stage-min"
-									min={0}
-									onChange={(event) =>
-										setStageMinTokens(
-											Number.parseInt(event.target.value || "0", 10),
-										)
-									}
-									type="number"
-									value={String(stageMinTokens)}
-								/>
-							</div>
-							<div className="flex flex-col gap-1">
-								<label
-									className="font-medium text-muted-foreground text-xs"
-									htmlFor="costs-create-stage-max"
-								>
-									Stage Max Tokens
-								</label>
-								<Input
-									id="costs-create-stage-max"
-									min={0}
-									onChange={(event) => setStageMaxTokens(event.target.value)}
-									placeholder="(optional)"
-									type="number"
-									value={stageMaxTokens}
-								/>
-							</div>
-						</div>
+						) : null}
 						<div className="flex flex-wrap items-center gap-3">
 							<Button
 								disabled={createCost.isPending || !canSubmit}
@@ -356,9 +369,16 @@ export function CostsClient() {
 												: tokenType.trim(),
 										unitOfMessure: unitOfMessure ?? null,
 										currency: currency.trim() || null,
-										stageType,
-										stageMinTokens,
-										stageMaxTokens: stageMaxTokensValue,
+										stageType:
+											requestType === RequestType.Rerank
+												? CostStageType.ContextLength
+												: stageType,
+										stageMinTokens:
+											requestType === RequestType.Rerank ? 0 : stageMinTokens,
+										stageMaxTokens:
+											requestType === RequestType.Rerank
+												? null
+												: stageMaxTokensValue,
 									})
 								}
 							>

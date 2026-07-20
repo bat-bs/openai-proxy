@@ -1041,10 +1041,16 @@ export const reportingRouter = createTRPCRouter({
 					hasMissingCosts: totalCostHasMissingCost,
 					currencyIssue: totalCurrencyIssue,
 				},
-				modelUsage: Array.from(modelTotals.values()).sort(
-					(a, b) =>
-						b.outputTokens + b.searchUnits - (a.outputTokens + a.searchUnits),
-				),
+				modelUsage: Array.from(modelTotals.values()).sort((a, b) => {
+					if (a.requestType !== b.requestType) {
+						return a.requestType === "CHAT_COMPLETION" ? -1 : 1;
+					}
+					const aUsage =
+						a.requestType === "RERANK" ? a.searchUnits : a.outputTokens;
+					const bUsage =
+						b.requestType === "RERANK" ? b.searchUnits : b.outputTokens;
+					return bUsage - aUsage;
+				}),
 				users: usersData,
 				cumulativeCosts: {
 					currencies: cumulativeCurrencies,
