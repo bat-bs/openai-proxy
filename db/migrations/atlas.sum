@@ -1,4 +1,4 @@
-h1:tzGjqaGJH8RH8w7olUspjzue//k1+FYPO0wS1eIG1xE=
+h1:sdM65UZKKLGZMBTXe/1jAzb4vYP94DKMkk25Jp/92BI=
 20240924151008_init.sql h1:rTjsfTqruGXjIUITaR6Pqt0n4lm+4EcdvESuYXgmyP4=
 20240924154252_request_monitoring.sql h1:VWH6kcc2DWS7L9tBQ8lgS858/9f5HP7PMYZo0fZlCX8=
 20241001124048_id_datatype.sql h1:Nb1OpAzcVshPzgEqQ3w/sCFjorO4h/GTOBeuISanu4k=
@@ -23,5 +23,5 @@ h1:tzGjqaGJH8RH8w7olUspjzue//k1+FYPO0wS1eIG1xE=
 20260323100000_costs_add_context_length_stages.sql h1:DFx//bwOQ6co8nTYBkoRNuyNKjt/UGGkaTK/zb/4vyA=
 20260324110000_costs_restore_natural_key_uniqueness.sql h1:h2X1ZXYqri2VBqpw+jf93XF0kXSlK4deOUZ1tlvuV7A=
 20260324120000_drop_backend_pricing_columns.sql h1:ucey3gRgAcRru2kVpNs22+aMbh76jPguUZoKQ7qJl0s=
-20260710120000_add_gpt56_cache_write_accounting.sql h1:nQIfhxKhz+ZUQ12NH2RJQG980bUJqjH9FpLv5z+w6FQ=
-20260718100000_add_request_types_and_search_units.sql h1:uo398TgAeI5qh9ZrrbZN6g3+nOe1jyt3ucUIUxBHHLM=
+20260718100000_add_request_types_and_search_units.sql h1:DB3/cpabrYd/E7x18iXCafhMqVMw5TSdvYiBJYXtV0o=
+20260818110000_add_gpt56_cache_write_accounting.sql h1:OpcV68YEKID7tO0vFeZU8loBRT3ZaqUHSJqgqiEoF/o=
