@@ -436,45 +436,6 @@ export const reportingRouter = createTRPCRouter({
 				}
 			}
 
-			const usersBase = ctx.db
-				.select({
-					userId: users.id,
-					name: users.name,
-					model: requests.model,
-					requestType: requests.requestType,
-					inputTokens:
-						sql<number>`greatest(coalesce(sum(${requests.inputTokenCount} - ${requests.cachedInputTokenCount} - ${requests.cacheWriteTokenCount}), 0), 0)`.as(
-							"inputTokens",
-						),
-					cachedInputTokens:
-						sql<number>`coalesce(sum(${requests.cachedInputTokenCount}), 0)`.as(
-							"cachedInputTokens",
-						),
-					cacheWriteTokens:
-						sql<number>`coalesce(sum(${requests.cacheWriteTokenCount}), 0)`.as(
-							"cacheWriteTokens",
-						),
-					outputTokens:
-						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
-							"outputTokens",
-						),
-					searchUnits:
-						sql<number>`coalesce(sum(${requests.searchUnits}), 0)`.as(
-							"searchUnits",
-						),
-				})
-				.from(users)
-				.leftJoin(apikeys, eq(apikeys.owner, users.id))
-				.leftJoin(
-					requests,
-					and(eq(requests.apiKeyId, apikeys.uuid), timeFilter),
-				);
-
-			const usageRows = await (scopedUserIds
-				? usersBase.where(inArray(users.id, scopedUserIds))
-				: usersBase
-			).groupBy(users.id, users.name, requests.model, requests.requestType);
-
 			const scopedConditions = [timeFilter];
 			if (scopedUserIds) {
 				scopedConditions.push(inArray(apikeys.owner, scopedUserIds));
@@ -485,6 +446,83 @@ export const reportingRouter = createTRPCRouter({
 				input.range.type === "daily"
 					? sql<string>`date_trunc('hour', ${requests.requestTime})`
 					: sql<string>`date_trunc('day', ${requests.requestTime})`;
+			const hourBucket = sql<number>`extract(hour from ${requests.requestTime})`;
+			const dayBucket = sql<number>`extract(dow from ${requests.requestTime})`;
+
+			type UserModel = {
+				model: string;
+				requestType: string;
+				inputTokens: number;
+				cachedInputTokens: number;
+				cacheWriteTokens: number;
+				outputTokens: number;
+				searchUnits: number;
+				inputCost: number | null;
+				cachedCost: number | null;
+				cacheWriteCost: number | null;
+				outputCost: number | null;
+				searchCost: number | null;
+				totalCost: number | null;
+				currency: string | null;
+				currencyIssue: boolean;
+				currencyTotals: Array<{ currency: string; totalCost: number }>;
+			};
+			type UserEntry = {
+				id: string;
+				name: string;
+				inputTokens: number;
+				cachedInputTokens: number;
+				cacheWriteTokens: number;
+				outputTokens: number;
+				searchUnits: number;
+				totalCostScaled: bigint;
+				totalCostHasKnownCost: boolean;
+				totalCostHasMissingCost: boolean;
+				currencyIssue: boolean;
+				currency: string | null;
+				currencyTotals: Map<string, bigint>;
+				models: UserModel[];
+			};
+			const usersMap = new Map<string, UserEntry>();
+			const usageMap = new Map<
+				string,
+				{
+					userId: string;
+					name: string;
+					model: string | null;
+					requestType: (typeof requests.requestType.enumValues)[number] | null;
+					inputTokens: number;
+					cachedInputTokens: number;
+					cacheWriteTokens: number;
+					outputTokens: number;
+					searchUnits: number;
+				}
+			>();
+			const emptyUser = (id: string, name: string): UserEntry => ({
+				id,
+				name,
+				inputTokens: 0,
+				cachedInputTokens: 0,
+				cacheWriteTokens: 0,
+				outputTokens: 0,
+				searchUnits: 0,
+				totalCostScaled: 0n,
+				totalCostHasKnownCost: false,
+				totalCostHasMissingCost: false,
+				currencyIssue: false,
+				currency: null,
+				currencyTotals: createCurrencyTotals(),
+				models: [],
+			});
+			const reportUsers = await ctx.db
+				.select({ id: users.id, name: users.name })
+				.from(users)
+				.where(scopedUserIds ? inArray(users.id, scopedUserIds) : undefined);
+			for (const user of reportUsers) {
+				usersMap.set(user.id, emptyUser(user.id, user.name ?? user.id));
+			}
+			const hourlyTotals = new Map<number, number>();
+			const dayHourTotals = new Map<string, number>();
 
 			// Fetch and index all pricing rows once; resolve cost per request afterwards.
 			const costRows = await ctx.db
@@ -605,17 +643,62 @@ export const reportingRouter = createTRPCRouter({
 					requestType: requests.requestType,
 					searchUnits: requests.searchUnits,
 					bucket: costBucket.as("bucket"),
+					hour: hourBucket.as("hour"),
+					day: dayBucket.as("day"),
 				})
 				.from(requests)
 				.innerJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
 				.innerJoin(users, eq(apikeys.owner, users.id))
-				.where(scopedFilter)
-				.orderBy(requests.requestTime);
+				.where(scopedFilter);
 
 			for (const row of requestRowsForCost) {
+				if (!row.requestTime) continue;
+				const user = usersMap.get(row.userId);
+				if (user) {
+					const inputTokenCount = Number(row.inputTokenCount ?? 0);
+					const cachedInputTokenCount = Number(row.cachedInputTokenCount ?? 0);
+					const cacheWriteTokens = Number(row.cacheWriteTokenCount ?? 0);
+					const outputTokenCount = Number(row.outputTokenCount ?? 0);
+					const searchUnits = Number(row.searchUnits ?? 0);
+					const usageKey = `${row.userId}::${row.model ?? ""}::${row.requestType ?? ""}`;
+					const usage = usageMap.get(usageKey) ?? {
+						userId: row.userId,
+						name: user.name,
+						model: row.model,
+						requestType: row.requestType,
+						inputTokens: 0,
+						cachedInputTokens: 0,
+						cacheWriteTokens: 0,
+						outputTokens: 0,
+						searchUnits: 0,
+					};
+					usage.inputTokens +=
+						inputTokenCount - cachedInputTokenCount - cacheWriteTokens;
+					usage.cachedInputTokens += cachedInputTokenCount;
+					usage.cacheWriteTokens += cacheWriteTokens;
+					usage.outputTokens += outputTokenCount;
+					usage.searchUnits += searchUnits;
+					usageMap.set(usageKey, usage);
+
+					const hour = Number(row.hour ?? 0);
+					hourlyTotals.set(
+						hour,
+						(hourlyTotals.get(hour) ?? 0) +
+							inputTokenCount +
+							cachedInputTokenCount +
+							outputTokenCount,
+					);
+					const rawDay = Number(row.day ?? 0);
+					const dayIndex = rawDay === 0 ? 6 : rawDay - 1;
+					const dayHourKey = `${dayIndex}-${hour}`;
+					dayHourTotals.set(
+						dayHourKey,
+						(dayHourTotals.get(dayHourKey) ?? 0) + outputTokenCount,
+					);
+				}
+
 				const model = row.model ?? null;
 				if (!model) continue;
-				if (!row.requestTime) continue;
 
 				const inputTokenCount = Number(row.inputTokenCount ?? 0);
 				const cachedInputTokenCount = Number(row.cachedInputTokenCount ?? 0);
@@ -752,54 +835,12 @@ export const reportingRouter = createTRPCRouter({
 				};
 			});
 
-			const hourBucket = sql<number>`extract(hour from ${requests.requestTime})`;
-			const hourlyRows = await ctx.db
-				.select({
-					hour: hourBucket.as("hour"),
-					totalTokens:
-						sql<number>`coalesce(sum(${requests.inputTokenCount} + ${requests.cachedInputTokenCount} + ${requests.outputTokenCount}), 0)`.as(
-							"totalTokens",
-						),
-				})
-				.from(requests)
-				.leftJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
-				.where(scopedFilter)
-				.groupBy(hourBucket);
-
-			const hourlyTotals = new Map<number, number>();
-			for (const row of hourlyRows) {
-				const hour = Number(row.hour ?? 0);
-				hourlyTotals.set(hour, Number(row.totalTokens ?? 0));
-			}
-
 			const hourlyTokens = Array.from({ length: 24 }, (_, hour) => ({
 				hour,
 				avgTokens: (hourlyTotals.get(hour) ?? 0) / dayCount,
 			}));
 
-			const dayBucket = sql<number>`extract(dow from ${requests.requestTime})`;
-			const hourlyDayRows = await ctx.db
-				.select({
-					day: dayBucket.as("day"),
-					hour: hourBucket.as("hour"),
-					outputTokens:
-						sql<number>`coalesce(sum(${requests.outputTokenCount}), 0)`.as(
-							"outputTokens",
-						),
-				})
-				.from(requests)
-				.leftJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
-				.where(scopedFilter)
-				.groupBy(dayBucket, hourBucket);
-
 			const dayLabels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-			const dayHourTotals = new Map<string, number>();
-			for (const row of hourlyDayRows) {
-				const rawDay = Number(row.day ?? 0);
-				const dayIndex = rawDay === 0 ? 6 : rawDay - 1;
-				const hour = Number(row.hour ?? 0);
-				dayHourTotals.set(`${dayIndex}-${hour}`, Number(row.outputTokens ?? 0));
-			}
 
 			const hourlyOutputByDay = Array.from({ length: 7 }, (_, dayIndex) => {
 				const dayLabel = dayLabels[dayIndex] ?? String(dayIndex);
@@ -814,42 +855,6 @@ export const reportingRouter = createTRPCRouter({
 							: 0,
 				}));
 			}).flat();
-
-			type UserModel = {
-				model: string;
-				requestType: string;
-				inputTokens: number;
-				cachedInputTokens: number;
-				cacheWriteTokens: number;
-				outputTokens: number;
-				searchUnits: number;
-				inputCost: number | null;
-				cachedCost: number | null;
-				cacheWriteCost: number | null;
-				outputCost: number | null;
-				searchCost: number | null;
-				totalCost: number | null;
-				currency: string | null;
-				currencyIssue: boolean;
-				currencyTotals: Array<{ currency: string; totalCost: number }>;
-			};
-			type UserEntry = {
-				id: string;
-				name: string;
-				inputTokens: number;
-				cachedInputTokens: number;
-				cacheWriteTokens: number;
-				outputTokens: number;
-				searchUnits: number;
-				totalCostScaled: bigint;
-				totalCostHasKnownCost: boolean;
-				totalCostHasMissingCost: boolean;
-				currencyIssue: boolean;
-				currency: string | null;
-				currencyTotals: Map<string, bigint>;
-				models: UserModel[];
-			};
-			const usersMap = new Map<string, UserEntry>();
 
 			const modelTotals = new Map<
 				string,
@@ -871,24 +876,15 @@ export const reportingRouter = createTRPCRouter({
 			let totalCurrencyIssue = false;
 			let totalCurrency: string | null = null;
 
+			const usageRows = Array.from(usageMap.values()).map((row) => ({
+				...row,
+				inputTokens: Math.max(0, row.inputTokens),
+			}));
+
 			for (const row of usageRows) {
 				const id = row.userId;
-				const entry: UserEntry = usersMap.get(id) ?? {
-					id,
-					name: row.name ?? id,
-					inputTokens: 0,
-					cachedInputTokens: 0,
-					cacheWriteTokens: 0,
-					outputTokens: 0,
-					searchUnits: 0,
-					totalCostScaled: 0n,
-					totalCostHasKnownCost: false,
-					totalCostHasMissingCost: false,
-					currencyIssue: false,
-					currency: null,
-					currencyTotals: createCurrencyTotals(),
-					models: [],
-				};
+				const entry = usersMap.get(id);
+				if (!entry) continue;
 
 				const inputTokens = Number(row.inputTokens ?? 0);
 				const cachedTokens = Number(row.cachedInputTokens ?? 0);
