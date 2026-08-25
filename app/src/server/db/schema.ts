@@ -5,6 +5,7 @@ import {
 	char,
 	date,
 	foreignKey,
+	index,
 	integer,
 	jsonb,
 	pgEnum,
@@ -81,6 +82,11 @@ export const requests = pgTable(
 			.notNull(),
 	},
 	(table) => [
+		index("requests_request_time_idx").on(table.requestTime),
+		index("requests_api_key_id_request_time_idx").on(
+			table.apiKeyId,
+			table.requestTime,
+		),
 		foreignKey({
 			columns: [table.apiKeyId],
 			foreignColumns: [apikeys.uuid],
@@ -99,6 +105,7 @@ export const apikeys = pgTable(
 		deactivated: boolean("deactivated").default(false).notNull(),
 	},
 	(table) => [
+		index("apikeys_owner_idx").on(table.owner),
 		foreignKey({
 			columns: [table.owner],
 			foreignColumns: [users.id],
