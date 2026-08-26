@@ -22,6 +22,11 @@ import {
 
 const userItems = [
 	{
+		href: "/my-usage",
+		label: "Meine Nutzung",
+		icon: BarChart3,
+	},
+	{
 		href: "/my-api-keys",
 		label: "Meine API-Schlüssel",
 		icon: KeyRound,

@@ -123,6 +123,16 @@ function getDateRange(input: z.infer<typeof reportRangeInput>) {
 }
 
 export const reportingRouter = createTRPCRouter({
+	listMyApiKeys: protectedProcedure.query(async ({ ctx }) => {
+		return ctx.db
+			.select({
+				id: apikeys.uuid,
+				description: apikeys.description,
+				deactivated: apikeys.deactivated,
+			})
+			.from(apikeys)
+			.where(eq(apikeys.owner, ctx.session.user.id));
+	}),
 	listGroups: protectedProcedure.query(async ({ ctx }) => {
 		const userId = ctx.session.user.id;
 		if (!userId) return [];
@@ -346,6 +356,8 @@ export const reportingRouter = createTRPCRouter({
 			z.object({
 				groupId: z.string().trim().min(1),
 				range: reportRangeInput,
+				apiKeyIds: z.array(z.string().trim().min(1)).default([]),
+				allApiKeys: z.boolean().default(true),
 			}),
 		)
 		.query(async ({ ctx, input }) => {
@@ -353,18 +365,32 @@ export const reportingRouter = createTRPCRouter({
 			const viewerId = ctx.session.user.id;
 			const groupId = input.groupId;
 			const groupIdNumber = groupId === "all" ? null : Number(groupId);
+			const selfReport = groupId === "self";
+			let selectedApiKeyIds: string[] = [];
+			if (selfReport) {
+				const ownedKeys = await ctx.db
+					.select({ id: apikeys.uuid })
+					.from(apikeys)
+					.where(eq(apikeys.owner, viewerId));
+				const ownedIds = new Set(ownedKeys.map((key) => key.id));
+				selectedApiKeyIds = input.allApiKeys
+					? Array.from(ownedIds)
+					: Array.from(
+							new Set(input.apiKeyIds.filter((id) => ownedIds.has(id))),
+						);
+			}
 
 			if (groupId === "all") {
 				if (!isAdmin) {
 					throw new TRPCError({ code: "FORBIDDEN" });
 				}
 			} else {
-				if (!Number.isFinite(groupIdNumber)) {
+				if (!selfReport && !Number.isFinite(groupIdNumber)) {
 					throw new TRPCError({ code: "BAD_REQUEST" });
 				}
 			}
 
-			if (groupId !== "all" && !isAdmin) {
+			if (groupId !== "all" && !selfReport && !isAdmin) {
 				const safeGroupId = groupIdNumber as number;
 				const viewer = await ctx.db
 					.select({ userId: reportingGroupViewers.userId })
@@ -398,7 +424,9 @@ export const reportingRouter = createTRPCRouter({
 			}
 
 			let scopedUserIds: string[] | null = null;
-			if (groupId !== "all") {
+			if (selfReport) {
+				scopedUserIds = [viewerId];
+			} else if (groupId !== "all") {
 				const safeGroupId = groupIdNumber as number;
 				const members = await ctx.db
 					.select({ userId: reportingGroupMembers.userId })
@@ -508,6 +536,35 @@ export const reportingRouter = createTRPCRouter({
 			for (const user of reportUsers) {
 				usersMap.set(user.id, emptyUser(user.id, user.name ?? user.id));
 			}
+			if (selfReport) {
+				const keyRows = await ctx.db
+					.select({
+						id: apikeys.uuid,
+						description: apikeys.description,
+						deactivated: apikeys.deactivated,
+					})
+					.from(apikeys)
+					.where(
+						and(
+							eq(apikeys.owner, viewerId),
+							input.allApiKeys
+								? sql`true`
+								: selectedApiKeyIds.length
+									? inArray(apikeys.uuid, selectedApiKeyIds)
+									: sql`false`,
+						),
+					);
+				usersMap.clear();
+				for (const key of keyRows) {
+					usersMap.set(
+						key.id,
+						emptyUser(
+							key.id,
+							`${key.description?.trim() || `API-Schlüssel ${key.id.slice(0, 8)}`}${key.deactivated ? " (deaktiviert)" : ""}`,
+						),
+					);
+				}
+			}
 			const hourlyTotals = new Map<number, number>();
 			const dayHourTotals = new Map<string, number>();
 
@@ -542,6 +599,14 @@ export const reportingRouter = createTRPCRouter({
 			];
 			if (scopedUserIds) {
 				cacheConditions.push(inArray(apikeys.owner, scopedUserIds));
+			}
+			if (selfReport && !input.allApiKeys && selectedApiKeyIds.length > 0) {
+				cacheConditions.push(
+					inArray(requestStatisticsCache.apiKeyId, selectedApiKeyIds),
+				);
+			}
+			if (selfReport && !input.allApiKeys && selectedApiKeyIds.length === 0) {
+				cacheConditions.push(sql`false`);
 			}
 			const requestRowsForCost = await ctx.db
 				.select({
@@ -585,17 +650,20 @@ export const reportingRouter = createTRPCRouter({
 
 			for (const row of requestRowsForCost) {
 				if (!row.requestTime) continue;
-				const user = usersMap.get(row.userId);
+				const user = usersMap.get(selfReport ? row.apiKeyId : row.userId);
 				if (user) {
 					const inputTokenCount = Number(row.inputTokenCount ?? 0);
 					const cachedInputTokenCount = Number(row.cachedInputTokenCount ?? 0);
 					const cacheWriteTokens = Number(row.cacheWriteTokenCount ?? 0);
 					const outputTokenCount = Number(row.outputTokenCount ?? 0);
 					const searchUnits = Number(row.searchUnits ?? 0);
-					const usageKey = `${row.userId}::${row.model ?? ""}::${row.requestType ?? ""}`;
+					const reportEntityId = selfReport ? row.apiKeyId : row.userId;
+					const usageKey = `${reportEntityId}::${row.model ?? ""}::${row.requestType ?? ""}`;
 					const usage = usageMap.get(usageKey) ?? {
-						userId: row.userId,
-						name: user.name,
+						userId: reportEntityId,
+						name: selfReport
+							? (usersMap.get(reportEntityId)?.name ?? reportEntityId)
+							: user.name,
 						model: row.model,
 						requestType: row.requestType,
 						inputTokens: 0,
@@ -701,7 +769,7 @@ export const reportingRouter = createTRPCRouter({
 					}
 				}
 
-				const userId = row.userId;
+				const userId = selfReport ? row.apiKeyId : row.userId;
 				const userModelKey = `${userId}::${model}::${row.requestType}`;
 				const agg =
 					costAggByUserModel.get(userModelKey) ??

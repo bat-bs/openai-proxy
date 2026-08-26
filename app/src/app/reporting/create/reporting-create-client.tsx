@@ -81,10 +81,22 @@ const pad = (value: number) => String(value).padStart(2, "0");
 const utcDateTimeLocalValue = (date: Date) =>
 	`${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
 
-export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
+export function ReportingCreateClient({
+	isAdmin,
+	isSelf = false,
+}: {
+	isAdmin: boolean;
+	isSelf?: boolean;
+}) {
 	const utils = api.useUtils();
 	const { data: groups = [], isLoading: groupsLoading } =
-		api.reporting.listGroups.useQuery();
+		api.reporting.listGroups.useQuery(undefined, { enabled: !isSelf });
+	const { data: myApiKeys = [] } = api.reporting.listMyApiKeys.useQuery(
+		undefined,
+		{ enabled: isSelf },
+	);
+	const [selectedApiKeyIds, setSelectedApiKeyIds] = useState<string[]>([]);
+	const [allApiKeys, setAllApiKeys] = useState(true);
 
 	const now = useMemo(() => new Date(), []);
 	const currentYear = now.getFullYear();
@@ -192,15 +204,17 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 		return selectedPeriodEnd.getTime() > now.getTime();
 	}, [now, selectedPeriodEnd]);
 
-	const reportEnabled = Boolean(selectedGroupId);
+	const reportEnabled = isSelf || Boolean(selectedGroupId);
 	const { data: report, isLoading: reportLoading } =
 		api.reporting.getReport.useQuery(
 			{
-				groupId: selectedGroupId,
+				groupId: isSelf ? "self" : selectedGroupId,
 				range: reportRange,
+				apiKeyIds: selectedApiKeyIds,
+				allApiKeys,
 			},
 			{
-				enabled: reportEnabled && (isAdmin || groups.length > 0),
+				enabled: reportEnabled && (isSelf || isAdmin || groups.length > 0),
 			},
 		);
 
@@ -436,7 +450,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 		return max;
 	}, [heatmapData]);
 
-	if (!isAdmin && !groupsLoading && availableGroups.length === 0) {
+	if (!isSelf && !isAdmin && !groupsLoading && availableGroups.length === 0) {
 		return (
 			<div className="rounded-none border border-border bg-card p-6 text-muted-foreground text-sm">
 				Du bist für keine Abrechnungsgruppe berechtigt, sie einzusehen.
@@ -448,27 +462,67 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 		<div className="flex flex-col gap-6">
 			<div className="rounded-none border border-border bg-card p-5">
 				<div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-					<div>
-						<label
-							className="font-medium text-muted-foreground text-xs"
-							htmlFor="reporting-group"
-						>
-							Abrechnungsgruppe
-						</label>
-						<div className="mt-2">
-							<NativeSelect
-								id="reporting-group"
-								onChange={(event) => setSelectedGroupId(event.target.value)}
-								value={selectedGroupId}
-							>
-								{availableGroups.map((group) => (
-									<NativeSelectOption key={group.id} value={group.id}>
-										{group.title}
-									</NativeSelectOption>
+					{isSelf ? (
+						<div>
+							<div className="font-medium text-muted-foreground text-xs">
+								API-Schlüssel
+							</div>
+							<div className="mt-2 flex flex-wrap gap-3 text-sm">
+								<label className="flex items-center gap-2">
+									<input
+										checked={allApiKeys}
+										onChange={(event) => {
+											setAllApiKeys(event.target.checked);
+											if (event.target.checked) setSelectedApiKeyIds([]);
+										}}
+										type="checkbox"
+									/>
+									Alle API-Schlüssel
+								</label>
+								{myApiKeys.map((key) => (
+									<label className="flex items-center gap-2" key={key.id}>
+										<input
+											checked={selectedApiKeyIds.includes(key.id)}
+											onChange={(event) => {
+												setAllApiKeys(false);
+												setSelectedApiKeyIds((current) =>
+													event.target.checked
+														? [...current, key.id]
+														: current.filter((id) => id !== key.id),
+												);
+											}}
+											type="checkbox"
+										/>
+										{key.description?.trim() ||
+											`API-Schlüssel ${key.id.slice(0, 8)}`}
+										{key.deactivated ? " (deaktiviert)" : ""}
+									</label>
 								))}
-							</NativeSelect>
+							</div>
 						</div>
-					</div>
+					) : (
+						<div>
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor="reporting-group"
+							>
+								Abrechnungsgruppe
+							</label>
+							<div className="mt-2">
+								<NativeSelect
+									id="reporting-group"
+									onChange={(event) => setSelectedGroupId(event.target.value)}
+									value={selectedGroupId}
+								>
+									{availableGroups.map((group) => (
+										<NativeSelectOption key={group.id} value={group.id}>
+											{group.title}
+										</NativeSelectOption>
+									))}
+								</NativeSelect>
+							</div>
+						</div>
+					)}
 					<div>
 						<div className="font-medium text-muted-foreground text-xs">
 							Zeitraum
@@ -904,7 +958,9 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 
 			<div className="rounded-none border border-border bg-card p-4">
 				<div className="font-medium text-muted-foreground text-xs">
-					Chat- und Rerank-Nutzung nach Benutzer
+					{isSelf
+						? "Chat- und Rerank-Nutzung nach API-Schlüssel"
+						: "Chat- und Rerank-Nutzung nach Benutzer"}
 				</div>
 				<div className="mt-4">
 					<Table className="border-collapse text-xs">
@@ -915,7 +971,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 										active={sorting?.id === "name" ? sorting.direction : null}
 										onClick={() => toggleSorting("name")}
 									>
-										Benutzer / Modell
+										{isSelf ? "API-Schlüssel / Modell" : "Benutzer / Modell"}
 									</SortButton>
 								</TableHead>
 								<TableHead className="pr-3 pb-2 font-medium">
@@ -1070,7 +1126,9 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 										className="py-4 text-center text-muted-foreground"
 										colSpan={6}
 									>
-										Keine Benutzer gefunden.
+										{isSelf
+											? "Keine API-Schlüssel gefunden."
+											: "Keine Benutzer gefunden."}
 									</TableCell>
 								</TableRow>
 							) : null}
