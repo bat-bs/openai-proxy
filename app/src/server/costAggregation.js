@@ -175,6 +175,33 @@ export function addResolvedTotalCost(aggregate, resolved) {
 }
 
 /**
+ * Merge an already-resolved total-cost aggregate into another aggregate.
+ * This is used by report caches, where individual requests have already
+ * been resolved with the correct price stage.
+ *
+ * @param {TotalCostAggregate} aggregate
+ * @param {TotalCostAggregate} source
+ */
+export function addTotalCostAggregate(aggregate, source) {
+	if (source.missing) {
+		aggregate.missing = true;
+		return aggregate;
+	}
+
+	aggregate.totalCostScaled += source.totalCostScaled;
+	for (const [currency, total] of source.currencyTotals) {
+		aggregate.currencyTotals.set(
+			currency,
+			(aggregate.currencyTotals.get(currency) ?? 0n) + total,
+		);
+	}
+	const currencyState = mergeCurrencyState(aggregate.currency, source.currency);
+	aggregate.currency = currencyState.currency;
+	aggregate.currencyIssue ||= source.currencyIssue || currencyState.issue;
+	return aggregate;
+}
+
+/**
  * @param {TotalCostAggregate | undefined} aggregate
  */
 export function presentTotalCost(aggregate) {
@@ -249,6 +276,35 @@ export function addResolvedBreakdownCost(aggregate, resolved) {
 	);
 	aggregate.currency = currencyState.currency;
 	aggregate.currencyIssue ||= currencyState.issue;
+	return aggregate;
+}
+
+/**
+ * Merge an already-resolved breakdown-cost aggregate into another aggregate.
+ *
+ * @param {BreakdownCostAggregate} aggregate
+ * @param {BreakdownCostAggregate} source
+ */
+export function addBreakdownCostAggregate(aggregate, source) {
+	if (source.missing) {
+		aggregate.missing = true;
+		return aggregate;
+	}
+
+	aggregate.inputCostScaled += source.inputCostScaled;
+	aggregate.cachedCostScaled += source.cachedCostScaled;
+	aggregate.cacheWriteCostScaled += source.cacheWriteCostScaled;
+	aggregate.outputCostScaled += source.outputCostScaled;
+	aggregate.searchCostScaled += source.searchCostScaled;
+	for (const [currency, total] of source.currencyTotals) {
+		aggregate.currencyTotals.set(
+			currency,
+			(aggregate.currencyTotals.get(currency) ?? 0n) + total,
+		);
+	}
+	const currencyState = mergeCurrencyState(aggregate.currency, source.currency);
+	aggregate.currency = currencyState.currency;
+	aggregate.currencyIssue ||= source.currencyIssue || currencyState.issue;
 	return aggregate;
 }
 

@@ -95,6 +95,116 @@ export const requests = pgTable(
 	],
 );
 
+export const requestStatisticsCacheBuckets = pgTable(
+	"request_statistics_cache_buckets",
+	{
+		bucketStart: timestamp("bucket_start", {
+			withTimezone: true,
+			mode: "string",
+		}).primaryKey(),
+		builtAt: timestamp("built_at", {
+			withTimezone: true,
+			mode: "string",
+		})
+			.defaultNow()
+			.notNull(),
+		invalidatedAt: timestamp("invalidated_at", {
+			withTimezone: true,
+			mode: "string",
+		}),
+	},
+);
+
+export const requestStatisticsCache = pgTable(
+	"request_statistics_cache",
+	{
+		bucketStart: timestamp("bucket_start", {
+			withTimezone: true,
+			mode: "string",
+		}).notNull(),
+		apiKeyId: varchar("api_key_id", { length: 255 }).notNull(),
+		// An empty string represents a request whose model is NULL. Keeping the
+		// key non-null lets the aggregate use a regular composite primary key.
+		model: varchar({ length: 255 }).notNull().default(""),
+		requestType: requestType("request_type").notNull(),
+		requestCount: bigint("request_count", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		inputTokenCount: bigint("input_token_count", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		cachedInputTokenCount: bigint("cached_input_token_count", {
+			mode: "bigint",
+		})
+			.notNull()
+			.default(0n),
+		cacheWriteTokenCount: bigint("cache_write_token_count", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		outputTokenCount: bigint("output_token_count", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		searchUnits: bigint("search_units", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		totalCostScaled: bigint("total_cost_scaled", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		inputCostScaled: bigint("input_cost_scaled", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		cachedCostScaled: bigint("cached_cost_scaled", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		cacheWriteCostScaled: bigint("cache_write_cost_scaled", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		outputCostScaled: bigint("output_cost_scaled", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		searchCostScaled: bigint("search_cost_scaled", { mode: "bigint" })
+			.notNull()
+			.default(0n),
+		currency: char({ length: 3 }),
+		currencyTotals: jsonb("currency_totals")
+			.$type<Record<string, string>>()
+			.notNull()
+			.default(sql`'{}'::jsonb`),
+		missingCost: boolean("missing_cost").notNull().default(false),
+		currencyIssue: boolean("currency_issue").notNull().default(false),
+		usedCosts: jsonb("used_costs")
+			.$type<unknown[]>()
+			.notNull()
+			.default(sql`'[]'::jsonb`),
+	},
+	(table) => [
+		primaryKey({
+			columns: [
+				table.bucketStart,
+				table.apiKeyId,
+				table.model,
+				table.requestType,
+			],
+			name: "request_statistics_cache_pkey",
+		}),
+		foreignKey({
+			columns: [table.bucketStart],
+			foreignColumns: [requestStatisticsCacheBuckets.bucketStart],
+			name: "request_statistics_cache_bucket_fkey",
+		}),
+		foreignKey({
+			columns: [table.apiKeyId],
+			foreignColumns: [apikeys.uuid],
+			name: "request_statistics_cache_api_key_fkey",
+		}),
+		index("request_statistics_cache_bucket_idx").on(table.bucketStart),
+		index("request_statistics_cache_api_key_bucket_idx").on(
+			table.apiKeyId,
+			table.bucketStart,
+		),
+	],
+);
+
 export const apikeys = pgTable(
 	"apikeys",
 	{

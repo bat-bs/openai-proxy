@@ -1,6 +1,7 @@
 # Release Notes
 
 ## Unreleased
+- Added lazy, exact hourly request-statistics caching for faster administrator reports, with pricing invalidation and manual UTC-range rebuilds.
 - Added separate chat-token and rerank-search reporting and dashboard charts.
 - Added request-type-aware rerank pricing management and filters.
 - Added administrator-only Azure Retail Pricing preview, rule mapping, auditing, and transactional import.
