@@ -13,7 +13,24 @@ import {
 	requestTypeOptions,
 } from "~/lib/costs";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import { apikeys, costs, models, requests, users } from "~/server/db/schema";
+import {
+	type AzureRule,
+	buildCostIdentity,
+	classifyConflict,
+	costIdentity,
+	evaluateRules,
+	normalizeAzurePrice,
+} from "~/server/azurePricing";
+import {
+	apikeys,
+	azurePricingAudits,
+	azurePricingConfig,
+	azurePricingRules,
+	costs,
+	models,
+	requests,
+	users,
+} from "~/server/db/schema";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 	if (!ctx.session.user.isAdmin) {
@@ -73,6 +90,128 @@ const costInput = z
 			});
 		}
 	});
+
+const azureConfigInput = z.object({
+	serviceName: z.string().trim().min(1).max(255).default("Azure OpenAI"),
+	armRegionName: z.string().trim().min(1).max(255),
+	currencyCode: z
+		.string()
+		.trim()
+		.regex(/^[A-Za-z]{3}$/)
+		.transform((value) => value.toUpperCase()),
+	productName: z.string().trim().max(255).nullable().optional(),
+	armSkuName: z.string().trim().max(255).nullable().optional(),
+	meterName: z.string().trim().max(255).nullable().optional(),
+});
+const azureRuleInput = z
+	.object({
+		id: z.number().int().positive().optional(),
+		name: z.string().trim().min(1).max(255),
+		enabled: z.boolean().default(true),
+		priority: z.number().int(),
+		action: z.enum(["map", "ignore"]),
+		conditions: z
+			.array(
+				z.object({
+					field: z.string().trim().min(1).max(255),
+					operator: z.enum(["equals", "contains", "regex"]),
+					value: z.string().max(2000),
+				}),
+			)
+			.max(32),
+		assignments: z
+			.object({
+				model: z.string().max(255).optional(),
+				requestType: z.enum(requestTypeOptions).optional(),
+				billingUnit: z.enum(billingUnitOptions).optional(),
+				tokenType: z.string().max(64).optional(),
+				stageMinTokens: z.union([z.string(), z.number()]).optional(),
+				stageMaxTokens: z.union([z.string(), z.number()]).nullable().optional(),
+			})
+			.default({}),
+	})
+	.superRefine((value, ctx) => {
+		for (const [index, condition] of value.conditions.entries()) {
+			if (condition.operator !== "regex") continue;
+			try {
+				new RegExp(condition.value);
+			} catch {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["conditions", index, "value"],
+					message: "Invalid regular expression",
+				});
+			}
+		}
+	});
+
+async function fetchAzurePrices(config: z.infer<typeof azureConfigInput>) {
+	const filters = [
+		`serviceName eq '${config.serviceName.replaceAll("'", "''")}'`,
+		`armRegionName eq '${config.armRegionName.replaceAll("'", "''")}'`,
+		"priceType eq 'Consumption'",
+	];
+	for (const [field, value] of [
+		["productName", config.productName],
+		["armSkuName", config.armSkuName],
+		["meterName", config.meterName],
+	] as const)
+		if (value) {
+			const escapedValue = value.replaceAll("'", "''");
+			filters.push(
+				field === "meterName"
+					? `contains(meterName, '${escapedValue}')`
+					: `${field} eq '${escapedValue}'`,
+			);
+		}
+	let next: string | undefined =
+		`https://prices.azure.com/api/retail/prices?${new URLSearchParams({
+			$filter: filters.join(" and "),
+			currencyCode: config.currencyCode,
+		}).toString()}`;
+	const pages: unknown[] = [];
+	const rows: Record<string, unknown>[] = [];
+	while (next) {
+		const response = await fetch(next, { signal: AbortSignal.timeout(30_000) });
+		if (!response.ok)
+			throw new Error(`Azure Retail Prices returned HTTP ${response.status}`);
+		const page = (await response.json()) as {
+			Items?: Record<string, unknown>[];
+			NextPageLink?: string;
+		};
+		if (!Array.isArray(page.Items))
+			throw new Error("Azure response did not contain an Items array");
+		pages.push(page);
+		rows.push(
+			...page.Items.filter(
+				(row) =>
+					String(row.type ?? "").toLowerCase() === "consumption" &&
+					!row.reservationTerm &&
+					!/(?:spot|low priority)/i.test(
+						`${String(row.skuName ?? "")} ${String(row.armSkuName ?? "")} ${String(row.meterName ?? "")}`,
+					),
+			),
+		);
+		next = page.NextPageLink;
+	}
+	return { pages, rows };
+}
+
+function configSnapshot(
+	row:
+		| typeof azurePricingConfig.$inferSelect
+		| z.infer<typeof azureConfigInput>,
+) {
+	return {
+		serviceName: row.serviceName,
+		armRegionName: row.armRegionName,
+		currencyCode: row.currencyCode.trim().toUpperCase(),
+		productName: row.productName ?? null,
+		armSkuName: row.armSkuName ?? null,
+		meterName: row.meterName ?? null,
+		priceType: "Consumption",
+	};
+}
 
 export const adminRouter = createTRPCRouter({
 	getUsageStats: adminProcedure
@@ -404,5 +543,500 @@ export const adminRouter = createTRPCRouter({
 								);
 					})(),
 				);
+		}),
+	azurePricing: adminProcedure.query(async ({ ctx }) => {
+		const [config] = await ctx.db.select().from(azurePricingConfig).limit(1);
+		const rules = await ctx.db
+			.select()
+			.from(azurePricingRules)
+			.orderBy(azurePricingRules.priority, azurePricingRules.id);
+		return { config: config ? configSnapshot(config) : null, rules };
+	}),
+	saveAzurePricingConfig: adminProcedure
+		.input(azureConfigInput)
+		.mutation(async ({ ctx, input }) => {
+			await ctx.db
+				.insert(azurePricingConfig)
+				.values({
+					...input,
+					id: 1,
+					priceType: "Consumption",
+					updatedAt: new Date().toISOString(),
+				})
+				.onConflictDoUpdate({
+					target: azurePricingConfig.id,
+					set: {
+						...input,
+						priceType: "Consumption",
+						updatedAt: new Date().toISOString(),
+					},
+				});
+		}),
+	createAzurePricingRule: adminProcedure
+		.input(azureRuleInput)
+		.mutation(async ({ ctx, input }) => {
+			const { id: _id, ...rule } = input;
+			await ctx.db.insert(azurePricingRules).values(rule);
+		}),
+	updateAzurePricingRule: adminProcedure
+		.input(azureRuleInput)
+		.mutation(async ({ ctx, input }) => {
+			if (!input.id)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Rule ID is required",
+				});
+			const { id, ...rule } = input;
+			await ctx.db
+				.update(azurePricingRules)
+				.set({ ...rule, updatedAt: new Date().toISOString() })
+				.where(eq(azurePricingRules.id, id));
+		}),
+	deleteAzurePricingRule: adminProcedure
+		.input(z.object({ id: z.number().int().positive() }))
+		.mutation(async ({ ctx, input }) => {
+			await ctx.db
+				.delete(azurePricingRules)
+				.where(eq(azurePricingRules.id, input.id));
+		}),
+	importAzurePricingRules: adminProcedure
+		.input(
+			z.object({
+				rules: z.array(azureRuleInput).min(1).max(500),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const rules = input.rules.map(({ id: _id, ...rule }) => rule);
+			await ctx.db.transaction(async (tx) => {
+				await tx.insert(azurePricingRules).values(rules);
+			});
+			return { count: rules.length };
+		}),
+	fetchAzurePricing: adminProcedure.mutation(async ({ ctx }) => {
+		const [stored] = await ctx.db.select().from(azurePricingConfig).limit(1);
+		if (!stored)
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Save Azure pricing configuration first",
+			});
+		const config = configSnapshot(stored);
+		try {
+			const fetched = await fetchAzurePrices(config);
+			const ruleRows = await ctx.db.select().from(azurePricingRules);
+			const modelRows = await ctx.db.select({ id: models.id }).from(models);
+			const modelIds = new Set(modelRows.map((model) => model.id));
+			const existingRows = await ctx.db
+				.select({
+					model: costs.model,
+					requestType: costs.requestType,
+					billingUnit: costs.billingUnit,
+					tokenType: costs.tokenType,
+					unitOfMessure: costs.unitOfMessure,
+					currency: costs.currency,
+					stageType: costs.stageType,
+					stageMinTokens: costs.stageMinTokens,
+					stageMaxTokens: costs.stageMaxTokens,
+					validFrom: costs.validFrom,
+					price: costs.price,
+				})
+				.from(costs);
+			const latestByIdentity = new Map<
+				string,
+				{ validFrom: string; price: number }
+			>();
+			for (const row of existingRows) {
+				const identity = costIdentity({
+					model: row.model,
+					requestType: row.requestType,
+					billingUnit: row.billingUnit,
+					tokenType: row.tokenType?.trim() ?? null,
+					unitOfMessure: row.unitOfMessure ?? "",
+					currency: row.currency?.trim() ?? "",
+					stageType: row.stageType,
+					stageMinTokens: row.stageMinTokens,
+					stageMaxTokens: row.stageMaxTokens,
+				});
+				const current = latestByIdentity.get(identity);
+				if (!current || row.validFrom > current.validFrom)
+					latestByIdentity.set(identity, {
+						validFrom: row.validFrom,
+						price: row.price,
+					});
+			}
+			const preview = fetched.rows.map((row, index) => {
+				const mapping = evaluateRules(row, ruleRows as AzureRule[], modelIds);
+				const normalized =
+					mapping.status === "mapped"
+						? normalizeAzurePrice(row, config.currencyCode)
+						: undefined;
+				const errors = [...mapping.errors];
+				if (normalized && "error" in normalized)
+					errors.push(normalized.error ?? "Invalid Azure price");
+				let conflict: "insert" | "older" | "unchanged" | "conflict" | undefined;
+				let classification:
+					| "insert"
+					| "older"
+					| "unchanged"
+					| "conflict"
+					| undefined;
+				if (
+					mapping.status === "mapped" &&
+					normalized &&
+					!("error" in normalized)
+				) {
+					const identity = buildCostIdentity(
+						mapping.assignments,
+						normalized.currency,
+					);
+					const historyClassification = classifyConflict(
+						{ validFrom: normalized.validFrom, price: normalized.price },
+						latestByIdentity.get(costIdentity(identity)),
+					);
+					if (
+						historyClassification === "skip" ||
+						historyClassification === "replace"
+					) {
+						conflict = "conflict";
+						classification = "conflict";
+					} else {
+						conflict = historyClassification;
+						classification = historyClassification;
+					}
+					if (conflict === "conflict")
+						errors.push("A same-date price conflict requires a decision");
+				}
+				return {
+					index,
+					raw: row,
+					...mapping,
+					status:
+						conflict === "conflict"
+							? "conflict"
+							: errors.length
+								? mapping.status === "mapped"
+									? "invalid"
+									: "unmapped"
+								: mapping.status,
+					errors,
+					normalized,
+					conflict,
+					classification,
+					decision:
+						mapping.status === "ignored"
+							? ("ignore" as const)
+							: ("skip" as const),
+				};
+			});
+			const duplicatePrices = new Map<string, Set<number>>();
+			for (const row of preview) {
+				if (
+					row.status !== "mapped" ||
+					!row.normalized ||
+					"error" in row.normalized
+				)
+					continue;
+				const key = `${costIdentity(buildCostIdentity(row.assignments ?? {}, row.normalized.currency))}|${row.normalized.validFrom}`;
+				const prices = duplicatePrices.get(key) ?? new Set<number>();
+				prices.add(row.normalized.price);
+				duplicatePrices.set(key, prices);
+			}
+			for (const row of preview) {
+				if (
+					row.status !== "mapped" ||
+					!row.normalized ||
+					"error" in row.normalized
+				)
+					continue;
+				const key = `${costIdentity(buildCostIdentity(row.assignments ?? {}, row.normalized.currency))}|${row.normalized.validFrom}`;
+				if ((duplicatePrices.get(key)?.size ?? 0) > 1) {
+					row.status = "conflict";
+					row.conflict = "conflict";
+					row.errors.push(
+						"Multiple fetched rows have different prices for this identity and date",
+					);
+				}
+			}
+			const [audit] = await ctx.db
+				.insert(azurePricingAudits)
+				.values({
+					operation: "fetch",
+					outcome: "success",
+					configuration: config,
+					rawResponse: fetched.pages,
+					counts: {
+						fetched: fetched.rows.length,
+						mapped: preview.filter((row) => row.status === "mapped").length,
+					},
+					rows: preview,
+				})
+				.returning({ id: azurePricingAudits.id });
+			return { auditId: audit?.id, config, rows: preview };
+		} catch (error) {
+			await ctx.db.insert(azurePricingAudits).values({
+				operation: "fetch",
+				outcome: "failed",
+				configuration: config,
+				rawResponse: [],
+				counts: {},
+				rows: [],
+				error: error instanceof Error ? error.message : String(error),
+			});
+			throw new TRPCError({
+				code: "BAD_GATEWAY",
+				message: error instanceof Error ? error.message : "Azure fetch failed",
+			});
+		}
+	}),
+	importAzurePricing: adminProcedure
+		.input(
+			z.object({
+				auditId: z.number().int().positive(),
+				rows: z.array(
+					z.object({
+						index: z.number().int().nonnegative(),
+						decision: z.enum(["skip", "replace", "ignore"]).default("skip"),
+					}),
+				),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const [fetchedAudit] = await ctx.db
+				.select()
+				.from(azurePricingAudits)
+				.where(eq(azurePricingAudits.id, input.auditId));
+			if (
+				!fetchedAudit ||
+				fetchedAudit.operation !== "fetch" ||
+				fetchedAudit.outcome !== "success"
+			)
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Fetch audit not found",
+				});
+			const config = azureConfigInput.parse(fetchedAudit.configuration);
+			const ruleRows = await ctx.db.select().from(azurePricingRules);
+			const modelRows = await ctx.db.select({ id: models.id }).from(models);
+			const modelIds = new Set(modelRows.map((model) => model.id));
+			const pages = Array.isArray(fetchedAudit.rawResponse)
+				? fetchedAudit.rawResponse
+				: [];
+			const sourceRows = pages.flatMap((page) => {
+				if (
+					!page ||
+					typeof page !== "object" ||
+					!Array.isArray((page as { Items?: unknown[] }).Items)
+				)
+					return [];
+				return (page as { Items: Record<string, unknown>[] }).Items.filter(
+					(row) =>
+						String(row.type ?? "").toLowerCase() === "consumption" &&
+						!row.reservationTerm &&
+						!/(?:spot|low priority)/i.test(
+							`${String(row.skuName ?? "")} ${String(row.armSkuName ?? "")} ${String(row.meterName ?? "")}`,
+						),
+				);
+			});
+			const inputIndexes = new Set(input.rows.map((row) => row.index));
+			if (
+				input.rows.length !== sourceRows.length ||
+				inputIndexes.size !== sourceRows.length ||
+				[...inputIndexes].some((index) => index >= sourceRows.length)
+			) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Every fetched row must have an explicit decision",
+				});
+			}
+			const duplicatePrices = new Map<string, Set<number>>();
+			for (const decision of input.rows) {
+				if (decision.decision === "ignore") continue;
+				const raw = sourceRows[decision.index];
+				if (!raw)
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Preview row no longer exists",
+					});
+				const mapping = evaluateRules(raw, ruleRows as AzureRule[], modelIds);
+				if (mapping.status !== "mapped")
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "Every invalid row must be explicitly ignored",
+					});
+				const normalized = normalizeAzurePrice(raw, config.currencyCode);
+				if ("error" in normalized)
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: normalized.error,
+					});
+				const key = `${costIdentity(buildCostIdentity(mapping.assignments, normalized.currency))}|${normalized.validFrom}`;
+				const prices = duplicatePrices.get(key) ?? new Set<number>();
+				prices.add(normalized.price);
+				duplicatePrices.set(key, prices);
+			}
+			if ([...duplicatePrices.values()].some((prices) => prices.size > 1))
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message:
+						"Multiple fetched prices share an identity and date; explicitly ignore all but one",
+				});
+			try {
+				const result = await ctx.db.transaction(async (tx) => {
+					const accepted = [];
+					for (const decision of input.rows) {
+						if (decision.decision === "ignore") {
+							accepted.push({ index: decision.index, status: "ignored" });
+							continue;
+						}
+						const raw = sourceRows[decision.index];
+						if (!raw)
+							throw new TRPCError({
+								code: "BAD_REQUEST",
+								message: "Preview row no longer exists",
+							});
+						const mapping = evaluateRules(
+							raw,
+							ruleRows as AzureRule[],
+							modelIds,
+						);
+						if (mapping.status !== "mapped")
+							throw new TRPCError({
+								code: "BAD_REQUEST",
+								message: "Every invalid row must be explicitly ignored",
+							});
+						const normalized = normalizeAzurePrice(raw, config.currencyCode);
+						if ("error" in normalized)
+							throw new TRPCError({
+								code: "BAD_REQUEST",
+								message: normalized.error,
+							});
+						const assignment = mapping.assignments as {
+							model?: string;
+							requestType?: string;
+							billingUnit?: string;
+							tokenType?: string;
+							stageMinTokens?: number;
+							stageMaxTokens?: number | null;
+						};
+						const identity = {
+							model: assignment.model ?? "",
+							requestType: assignment.requestType ?? "",
+							billingUnit: assignment.billingUnit ?? "",
+							tokenType: assignment.tokenType ?? null,
+							unitOfMessure: "1M",
+							currency: normalized.currency,
+							stageType: "context_length",
+							stageMinTokens: assignment.stageMinTokens ?? 0,
+							stageMaxTokens: assignment.stageMaxTokens ?? null,
+						};
+						const history = await tx
+							.select({
+								id: costs.id,
+								validFrom: costs.validFrom,
+								price: costs.price,
+							})
+							.from(costs)
+							.where(
+								and(
+									eq(costs.model, identity.model),
+									eq(costs.requestType, identity.requestType as never),
+									eq(costs.billingUnit, identity.billingUnit as never),
+									identity.tokenType === null
+										? sql`${costs.tokenType} IS NULL`
+										: eq(costs.tokenType, identity.tokenType),
+									eq(costs.unitOfMessure, identity.unitOfMessure as never),
+									eq(costs.currency, identity.currency),
+									eq(costs.stageType, identity.stageType),
+									eq(costs.stageMinTokens, identity.stageMinTokens),
+									identity.stageMaxTokens === null
+										? sql`${costs.stageMaxTokens} IS NULL`
+										: eq(costs.stageMaxTokens, identity.stageMaxTokens),
+								),
+							)
+							.orderBy(sql`${costs.validFrom} desc`)
+							.limit(1);
+						const classification = classifyConflict(
+							{ validFrom: normalized.validFrom, price: normalized.price },
+							history[0],
+							decision.decision,
+						);
+						if (
+							classification === "older" ||
+							classification === "unchanged" ||
+							classification === "skip"
+						) {
+							accepted.push({ index: decision.index, status: classification });
+							continue;
+						}
+						if (classification === "replace" && history[0])
+							await tx.delete(costs).where(eq(costs.id, history[0].id));
+						const [created] = await tx
+							.insert(costs)
+							.values({
+								...identity,
+								requestType: identity.requestType as never,
+								billingUnit: identity.billingUnit as never,
+								price: normalized.price,
+								validFrom: normalized.validFrom,
+								unitOfMessure: "1M",
+								currency: normalized.currency,
+								tokenType: identity.tokenType,
+							})
+							.returning({ id: costs.id });
+						accepted.push({
+							index: decision.index,
+							status: classification,
+							id: created?.id,
+						});
+					}
+					return accepted;
+				});
+				await ctx.db.insert(azurePricingAudits).values({
+					operation: "import",
+					outcome: "success",
+					fetchedAuditId: fetchedAudit.id,
+					configuration: config,
+					rawResponse: fetchedAudit.rawResponse,
+					counts: { rows: input.rows.length },
+					rows: result,
+				});
+				return result;
+			} catch (error) {
+				await ctx.db.insert(azurePricingAudits).values({
+					operation: "import",
+					outcome: "failed",
+					fetchedAuditId: fetchedAudit.id,
+					configuration: config,
+					rawResponse: fetchedAudit.rawResponse,
+					counts: {},
+					rows: input.rows,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
+		}),
+	listAzurePricingAudits: adminProcedure.query(({ ctx }) =>
+		ctx.db
+			.select({
+				id: azurePricingAudits.id,
+				fetchedAuditId: azurePricingAudits.fetchedAuditId,
+				createdAt: azurePricingAudits.createdAt,
+				operation: azurePricingAudits.operation,
+				outcome: azurePricingAudits.outcome,
+				counts: azurePricingAudits.counts,
+				error: azurePricingAudits.error,
+			})
+			.from(azurePricingAudits)
+			.orderBy(sql`${azurePricingAudits.createdAt} desc`)
+			.limit(50),
+	),
+	getAzurePricingAudit: adminProcedure
+		.input(z.object({ id: z.number().int().positive() }))
+		.query(async ({ ctx, input }) => {
+			const [audit] = await ctx.db
+				.select()
+				.from(azurePricingAudits)
+				.where(eq(azurePricingAudits.id, input.id));
+			if (!audit) throw new TRPCError({ code: "NOT_FOUND" });
+			return audit;
 		}),
 });

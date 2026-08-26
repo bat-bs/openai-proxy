@@ -2,6 +2,7 @@
 apiproxy.sqlite
 apgiproxy.sqlite
 vendor/
+.gocache/
 
 .pre-commit-config.yaml
 .direnv
@@ -9,3 +10,4 @@ vendor/
 .idea
 
 local-dev/postgres-data-fresh
+tmp/
