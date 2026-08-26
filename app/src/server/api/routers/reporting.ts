@@ -1,12 +1,10 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import {
 	addCurrencyTotal,
-	addResolvedBreakdownCost,
-	addResolvedTotalCost,
 	createBreakdownCostAggregate,
 	createCurrencyTotals,
 	createTotalCostAggregate,
@@ -16,21 +14,20 @@ import {
 	scaledCostToNumber,
 } from "~/server/costAggregation";
 import {
-	buildCostStageIndex,
-	type CostStageRow,
-	resolveRequestCostStage,
-	resolveRerankCost,
-	tokenTypeLabelWithStage,
-} from "~/server/costStageResolver";
-import {
 	apikeys,
-	costs,
 	reportingGroupMembers,
 	reportingGroups,
 	reportingGroupViewers,
-	requests,
+	requestStatisticsCache,
+	requestStatisticsCacheBuckets,
 	users,
 } from "~/server/db/schema";
+import {
+	ensureRequestStatisticsCache,
+	mergeCachedBreakdownCost,
+	mergeCachedTotalCost,
+	rebuildRequestStatisticsCache,
+} from "~/server/requestStatisticsCache";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 	if (!ctx.session.user.isAdmin) {
@@ -385,7 +382,6 @@ export const reportingRouter = createTRPCRouter({
 			}
 
 			const { start, end } = getDateRange(input.range);
-			const timeFilter = sql`${requests.requestTime} >= ${start.toISOString()} AND ${requests.requestTime} < ${end.toISOString()}`;
 			const dayCount = Math.max(
 				1,
 				Math.ceil((end.getTime() - start.getTime()) / 86_400_000),
@@ -436,18 +432,7 @@ export const reportingRouter = createTRPCRouter({
 				}
 			}
 
-			const scopedConditions = [timeFilter];
-			if (scopedUserIds) {
-				scopedConditions.push(inArray(apikeys.owner, scopedUserIds));
-			}
-			const scopedFilter = and(...scopedConditions);
-
-			const costBucket =
-				input.range.type === "daily"
-					? sql<string>`date_trunc('hour', ${requests.requestTime})`
-					: sql<string>`date_trunc('day', ${requests.requestTime})`;
-			const hourBucket = sql<number>`extract(hour from ${requests.requestTime})`;
-			const dayBucket = sql<number>`extract(dow from ${requests.requestTime})`;
+			await ensureRequestStatisticsCache(ctx.db, start, end);
 
 			type UserModel = {
 				model: string;
@@ -490,7 +475,9 @@ export const reportingRouter = createTRPCRouter({
 					userId: string;
 					name: string;
 					model: string | null;
-					requestType: (typeof requests.requestType.enumValues)[number] | null;
+					requestType:
+						| (typeof requestStatisticsCache.requestType.enumValues)[number]
+						| null;
 					inputTokens: number;
 					cachedInputTokens: number;
 					cacheWriteTokens: number;
@@ -524,40 +511,6 @@ export const reportingRouter = createTRPCRouter({
 			const hourlyTotals = new Map<number, number>();
 			const dayHourTotals = new Map<string, number>();
 
-			// Fetch and index all pricing rows once; resolve cost per request afterwards.
-			const costRows = await ctx.db
-				.select({
-					model: costs.model,
-					price: costs.price,
-					validFrom: costs.validFrom,
-					requestType: costs.requestType,
-					billingUnit: costs.billingUnit,
-					tokenType: costs.tokenType,
-					unitOfMessure: costs.unitOfMessure,
-					currency: costs.currency,
-					stageType: costs.stageType,
-					stageMinTokens: costs.stageMinTokens,
-					stageMaxTokens: costs.stageMaxTokens,
-				})
-				.from(costs);
-
-			const costStageRows: CostStageRow[] = costRows.map((row) => ({
-				model: row.model ?? "",
-				requestType: row.requestType,
-				billingUnit: row.billingUnit,
-				tokenType: row.tokenType ?? "",
-				price: Number(row.price ?? 0),
-				validFrom: row.validFrom ?? new Date(0),
-				unitOfMessure: (row.unitOfMessure ??
-					null) as CostStageRow["unitOfMessure"],
-				currency: row.currency ? row.currency.trim().toUpperCase() : null,
-				stageType: row.stageType ?? "context_length",
-				stageMinTokens: Number(row.stageMinTokens ?? 0),
-				stageMaxTokens: row.stageMaxTokens ?? null,
-			}));
-
-			const costStageIndex = buildCostStageIndex(costStageRows);
-
 			const usedCosts = new Map<
 				string,
 				{
@@ -571,55 +524,6 @@ export const reportingRouter = createTRPCRouter({
 				}
 			>();
 
-			const registerUsedCost = (
-				tokenType: "input" | "cached" | "cache_write" | "output",
-				usedCost: CostStageRow,
-			) => {
-				const stageMin = usedCost.stageMinTokens;
-				const stageMax = usedCost.stageMaxTokens;
-				const tokenTypeLabel = tokenTypeLabelWithStage(
-					tokenType,
-					stageMin,
-					stageMax,
-				);
-				const validFrom = usedCost.validFrom
-					? new Date(usedCost.validFrom).toISOString().slice(0, 10)
-					: null;
-				const key = `${normalize(usedCost.model)}::${tokenTypeLabel}::${validFrom}`;
-				if (usedCosts.has(key)) return;
-
-				usedCosts.set(key, {
-					model: usedCost.model,
-					tokenType: tokenTypeLabel,
-					billingUnit: "TOKENS",
-					price: usedCost.price,
-					unit: usedCost.unitOfMessure as "1M" | "1K" | null,
-					currency: usedCost.currency
-						? usedCost.currency.trim().toUpperCase()
-						: null,
-					validFrom,
-				});
-			};
-
-			const registerUsedSearchCost = (usedCost: CostStageRow) => {
-				const validFrom = usedCost.validFrom
-					? new Date(usedCost.validFrom).toISOString().slice(0, 10)
-					: null;
-				const key = `${normalize(usedCost.model)}::SEARCHES::${validFrom}`;
-				if (usedCosts.has(key)) return;
-				usedCosts.set(key, {
-					model: usedCost.model,
-					tokenType: "searches",
-					billingUnit: "SEARCHES",
-					price: usedCost.price,
-					unit: usedCost.unitOfMessure as "1M" | "1K" | null,
-					currency: usedCost.currency
-						? usedCost.currency.trim().toUpperCase()
-						: null,
-					validFrom,
-				});
-			};
-
 			const costBuckets = new Map<
 				string,
 				ReturnType<typeof createTotalCostAggregate> & { date: Date }
@@ -631,25 +535,53 @@ export const reportingRouter = createTRPCRouter({
 			>();
 			const reportCurrencyTotals = createCurrencyTotals();
 
+			const cacheConditions = [
+				gte(requestStatisticsCache.bucketStart, start.toISOString()),
+				lt(requestStatisticsCache.bucketStart, end.toISOString()),
+				isNull(requestStatisticsCacheBuckets.invalidatedAt),
+			];
+			if (scopedUserIds) {
+				cacheConditions.push(inArray(apikeys.owner, scopedUserIds));
+			}
 			const requestRowsForCost = await ctx.db
 				.select({
+					bucketStart: requestStatisticsCache.bucketStart,
+					apiKeyId: requestStatisticsCache.apiKeyId,
 					userId: users.id,
-					model: requests.model,
-					requestTime: requests.requestTime,
-					inputTokenCount: requests.inputTokenCount,
-					cachedInputTokenCount: requests.cachedInputTokenCount,
-					cacheWriteTokenCount: requests.cacheWriteTokenCount,
-					outputTokenCount: requests.outputTokenCount,
-					requestType: requests.requestType,
-					searchUnits: requests.searchUnits,
-					bucket: costBucket.as("bucket"),
-					hour: hourBucket.as("hour"),
-					day: dayBucket.as("day"),
+					model: sql<
+						string | null
+					>`NULLIF(${requestStatisticsCache.model}, '')`.as("model"),
+					requestTime: requestStatisticsCache.bucketStart,
+					inputTokenCount: requestStatisticsCache.inputTokenCount,
+					cachedInputTokenCount: requestStatisticsCache.cachedInputTokenCount,
+					cacheWriteTokenCount: requestStatisticsCache.cacheWriteTokenCount,
+					outputTokenCount: requestStatisticsCache.outputTokenCount,
+					requestType: requestStatisticsCache.requestType,
+					searchUnits: requestStatisticsCache.searchUnits,
+					requestCount: requestStatisticsCache.requestCount,
+					totalCostScaled: requestStatisticsCache.totalCostScaled,
+					inputCostScaled: requestStatisticsCache.inputCostScaled,
+					cachedCostScaled: requestStatisticsCache.cachedCostScaled,
+					cacheWriteCostScaled: requestStatisticsCache.cacheWriteCostScaled,
+					outputCostScaled: requestStatisticsCache.outputCostScaled,
+					searchCostScaled: requestStatisticsCache.searchCostScaled,
+					currency: requestStatisticsCache.currency,
+					currencyTotals: requestStatisticsCache.currencyTotals,
+					missingCost: requestStatisticsCache.missingCost,
+					currencyIssue: requestStatisticsCache.currencyIssue,
+					usedCosts: requestStatisticsCache.usedCosts,
 				})
-				.from(requests)
-				.innerJoin(apikeys, eq(apikeys.uuid, requests.apiKeyId))
+				.from(requestStatisticsCache)
+				.innerJoin(
+					requestStatisticsCacheBuckets,
+					eq(
+						requestStatisticsCacheBuckets.bucketStart,
+						requestStatisticsCache.bucketStart,
+					),
+				)
+				.innerJoin(apikeys, eq(apikeys.uuid, requestStatisticsCache.apiKeyId))
 				.innerJoin(users, eq(apikeys.owner, users.id))
-				.where(scopedFilter);
+				.where(and(...cacheConditions));
 
 			for (const row of requestRowsForCost) {
 				if (!row.requestTime) continue;
@@ -680,7 +612,8 @@ export const reportingRouter = createTRPCRouter({
 					usage.searchUnits += searchUnits;
 					usageMap.set(usageKey, usage);
 
-					const hour = Number(row.hour ?? 0);
+					const requestDate = new Date(row.requestTime);
+					const hour = requestDate.getUTCHours();
 					hourlyTotals.set(
 						hour,
 						(hourlyTotals.get(hour) ?? 0) +
@@ -688,7 +621,7 @@ export const reportingRouter = createTRPCRouter({
 							cachedInputTokenCount +
 							outputTokenCount,
 					);
-					const rawDay = Number(row.day ?? 0);
+					const rawDay = requestDate.getUTCDay();
 					const dayIndex = rawDay === 0 ? 6 : rawDay - 1;
 					const dayHourKey = `${dayIndex}-${hour}`;
 					dayHourTotals.set(
@@ -698,6 +631,8 @@ export const reportingRouter = createTRPCRouter({
 				}
 
 				const model = row.model ?? null;
+				// Keep parity with the uncached report: requests without a model
+				// contribute to user/token totals, but not to cost/model buckets.
 				if (!model) continue;
 
 				const inputTokenCount = Number(row.inputTokenCount ?? 0);
@@ -705,8 +640,6 @@ export const reportingRouter = createTRPCRouter({
 				const cacheWriteTokens = Number(row.cacheWriteTokenCount ?? 0);
 				const outputTokenCount = Number(row.outputTokenCount ?? 0);
 				const searchUnits = Number(row.searchUnits ?? 0);
-
-				// Keep output stable: ignore requests that contain no billed tokens.
 				if (
 					inputTokenCount +
 						cachedInputTokenCount +
@@ -717,78 +650,63 @@ export const reportingRouter = createTRPCRouter({
 				)
 					continue;
 
-				const bucketValue = row.bucket;
-				if (!bucketValue) continue;
-				const bucketDate = new Date(bucketValue);
+				const hourDate = new Date(row.requestTime);
+				const bucketDate =
+					input.range.type === "daily"
+						? hourDate
+						: new Date(
+								Date.UTC(
+									hourDate.getUTCFullYear(),
+									hourDate.getUTCMonth(),
+									hourDate.getUTCDate(),
+								),
+							);
 				const bucketKey = bucketDate.toISOString();
-
-				const resolved =
-					row.requestType === "RERANK"
-						? (() => {
-								const rerank = resolveRerankCost(costStageRows, {
-									model,
-									requestTime: new Date(row.requestTime),
-									searchUnits,
-								});
-								return {
-									totalCost: rerank.cost,
-									currency: rerank.currency,
-									missing: rerank.missing,
-									inputCost: { cost: 0, usedCost: null },
-									cachedCost: { cost: 0, usedCost: null },
-									cacheWriteCost: { cost: 0, usedCost: null },
-									outputCost: { cost: 0, usedCost: null },
-									searchCost: { cost: rerank.cost, usedCost: rerank.usedCost },
-								};
-							})()
-						: (() => {
-								const chat = resolveRequestCostStage(costStageIndex, {
-									model,
-									requestTime: new Date(row.requestTime),
-									inputTokenCount,
-									cachedInputTokenCount,
-									cacheWriteTokenCount: cacheWriteTokens,
-									outputTokenCount,
-								});
-								return {
-									...chat,
-									searchCost: { cost: 0, usedCost: null },
-								};
-							})();
-
 				const bucket = costBuckets.get(bucketKey) ?? {
 					date: bucketDate,
 					...createTotalCostAggregate(),
 				};
+				mergeCachedTotalCost(bucket, row);
+				costBuckets.set(bucketKey, bucket);
 
-				addResolvedTotalCost(bucket, resolved);
-				if (!resolved.missing) {
-					if (resolved.inputCost.usedCost) {
-						registerUsedCost("input", resolved.inputCost.usedCost);
-					}
-					if (resolved.cachedCost.usedCost) {
-						registerUsedCost("cached", resolved.cachedCost.usedCost);
-					}
-					if (resolved.cacheWriteCost.usedCost) {
-						registerUsedCost("cache_write", resolved.cacheWriteCost.usedCost);
-					}
-					if (resolved.outputCost.usedCost) {
-						registerUsedCost("output", resolved.outputCost.usedCost);
-					}
-					if (resolved.searchCost?.usedCost) {
-						registerUsedSearchCost(resolved.searchCost.usedCost);
+				if (!row.missingCost) {
+					for (const usedCost of row.usedCosts ?? []) {
+						if (!usedCost || typeof usedCost !== "object") continue;
+						const detail = usedCost as {
+							model?: string;
+							tokenType?: string;
+							billingUnit?: "TOKENS" | "SEARCHES";
+							price?: number;
+							unit?: "1M" | "1K" | null;
+							currency?: string | null;
+							validFrom?: string | null;
+						};
+						if (
+							typeof detail.model !== "string" ||
+							typeof detail.tokenType !== "string" ||
+							typeof detail.billingUnit !== "string" ||
+							typeof detail.price !== "number"
+						)
+							continue;
+						const key = `${normalize(detail.model)}::${detail.tokenType}::${detail.validFrom ?? null}`;
+						usedCosts.set(key, {
+							model: detail.model,
+							tokenType: detail.tokenType,
+							billingUnit: detail.billingUnit,
+							price: detail.price,
+							unit: detail.unit ?? null,
+							currency: detail.currency ?? null,
+							validFrom: detail.validFrom ?? null,
+						});
 					}
 				}
-
-				costBuckets.set(bucketKey, bucket);
 
 				const userId = row.userId;
 				const userModelKey = `${userId}::${model}::${row.requestType}`;
 				const agg =
 					costAggByUserModel.get(userModelKey) ??
 					createBreakdownCostAggregate();
-				addResolvedBreakdownCost(agg, resolved);
-
+				mergeCachedBreakdownCost(agg, row);
 				costAggByUserModel.set(userModelKey, agg);
 			}
 
@@ -1098,6 +1016,44 @@ export const reportingRouter = createTRPCRouter({
 				hourlyTokens,
 				hourlyOutputByDay,
 				costsUsed,
+			};
+		}),
+	rebuildCache: adminProcedure
+		.input(
+			z.object({
+				from: z
+					.string()
+					.trim()
+					.regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
+				to: z
+					.string()
+					.trim()
+					.regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			const start = new Date(`${input.from}:00Z`);
+			const end = new Date(`${input.to}:00Z`);
+			if (
+				!Number.isFinite(start.getTime()) ||
+				!Number.isFinite(end.getTime())
+			) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Invalid UTC range",
+				});
+			}
+			if (end <= start) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "The end of the range must be after its start",
+				});
+			}
+
+			await rebuildRequestStatisticsCache(ctx.db, start, end);
+			return {
+				from: start.toISOString(),
+				to: end.toISOString(),
 			};
 		}),
 });

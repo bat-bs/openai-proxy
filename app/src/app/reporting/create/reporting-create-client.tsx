@@ -16,7 +16,9 @@ import {
 	YAxis,
 	ZAxis,
 } from "recharts";
+import { toast } from "sonner";
 
+import { Button } from "~/components/ui/button";
 import {
 	type ChartConfig,
 	ChartContainer,
@@ -76,7 +78,11 @@ const timeframeOptions = [
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
+const utcDateTimeLocalValue = (date: Date) =>
+	`${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+
 export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
+	const utils = api.useUtils();
 	const { data: groups = [], isLoading: groupsLoading } =
 		api.reporting.listGroups.useQuery();
 
@@ -96,6 +102,26 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 	const [quarterYear, setQuarterYear] = useState(currentYear);
 	const [quarterValue, setQuarterValue] = useState(currentQuarter);
 	const [yearValue, setYearValue] = useState(currentYear);
+	const [cacheFrom, setCacheFrom] = useState(() => {
+		const date = new Date();
+		date.setUTCDate(date.getUTCDate() - 7);
+		return utcDateTimeLocalValue(date);
+	});
+	const [cacheTo, setCacheTo] = useState(() =>
+		utcDateTimeLocalValue(new Date()),
+	);
+	const [cacheRebuiltAt, setCacheRebuiltAt] = useState<string | null>(null);
+	const rebuildCache = api.reporting.rebuildCache.useMutation({
+		onSuccess: async () => {
+			setCacheRebuiltAt(new Date().toISOString());
+			await utils.reporting.getReport.invalidate();
+			toast.success("Reporting-Cache erfolgreich neu aufgebaut.");
+		},
+		onError: () => {
+			setCacheRebuiltAt(null);
+			toast.error("Reporting-Cache konnte nicht neu aufgebaut werden.");
+		},
+	});
 
 	const availableGroups = useMemo(() => {
 		const list = groups.map((group) => ({
@@ -177,6 +203,20 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 				enabled: reportEnabled && (isAdmin || groups.length > 0),
 			},
 		);
+
+	const rebuildCacheForRange = () => {
+		if (!cacheFrom || !cacheTo) {
+			toast.error("Bitte Start und Ende des Zeitraums angeben.");
+			return;
+		}
+		if (cacheFrom >= cacheTo) {
+			toast.error("Das Ende muss nach dem Start liegen.");
+			return;
+		}
+
+		setCacheRebuiltAt(null);
+		rebuildCache.mutate({ from: cacheFrom, to: cacheTo });
+	};
 
 	const numberFormatter = useMemo(() => new Intl.NumberFormat("de-DE"), []);
 	const costFormatter = useMemo(
@@ -505,6 +545,72 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 					</div>
 				</div>
 			</div>
+
+			{isAdmin ? (
+				<div className="rounded-none border border-border bg-card p-5">
+					<div className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+						Reporting-Cache neu aufbauen
+					</div>
+					<p className="mt-2 text-muted-foreground text-sm">
+						Zeitraum in UTC auswählen und die aggregierten Reporting-Daten
+						manuell neu berechnen.
+					</p>
+					<div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-end">
+						<div className="flex-1">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor="reporting-cache-from"
+							>
+								Von (UTC)
+							</label>
+							<Input
+								className="mt-2"
+								disabled={rebuildCache.isPending}
+								id="reporting-cache-from"
+								onChange={(event) => setCacheFrom(event.target.value)}
+								type="datetime-local"
+								value={cacheFrom}
+							/>
+						</div>
+						<div className="flex-1">
+							<label
+								className="font-medium text-muted-foreground text-xs"
+								htmlFor="reporting-cache-to"
+							>
+								Bis (UTC)
+							</label>
+							<Input
+								className="mt-2"
+								disabled={rebuildCache.isPending}
+								id="reporting-cache-to"
+								onChange={(event) => setCacheTo(event.target.value)}
+								type="datetime-local"
+								value={cacheTo}
+							/>
+						</div>
+						<Button
+							disabled={rebuildCache.isPending}
+							onClick={rebuildCacheForRange}
+							type="button"
+						>
+							{rebuildCache.isPending
+								? "Wird neu aufgebaut ..."
+								: "Cache neu aufbauen"}
+						</Button>
+					</div>
+					{rebuildCache.isError ? (
+						<div className="mt-3 text-destructive text-xs" role="alert">
+							{rebuildCache.error?.message ||
+								"Der Cache konnte nicht neu aufgebaut werden."}
+						</div>
+					) : null}
+					{cacheRebuiltAt ? (
+						<output className="mt-3 block text-muted-foreground text-xs">
+							Cache erfolgreich neu aufgebaut.
+						</output>
+					) : null}
+				</div>
+			) : null}
 
 			<div className="rounded-none border border-border bg-card p-6">
 				<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1000,7 +1106,7 @@ export function ReportingCreateClient({ isAdmin }: { isAdmin: boolean }) {
 							{costsUsed.map((cost) => (
 								<TableRow
 									className="border-border/60"
-									key={`${cost.model}-${cost.tokenType}`}
+									key={`${cost.model}-${cost.tokenType}-${cost.billingUnit}-${cost.price}-${cost.unit ?? ""}-${cost.currency ?? ""}-${cost.validFrom ?? ""}`}
 								>
 									<TableCell className="py-2 pr-3 font-medium">
 										{cost.model}
