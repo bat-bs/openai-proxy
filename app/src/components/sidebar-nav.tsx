@@ -40,6 +40,11 @@ const adminItems = [
 		icon: Coins,
 	},
 	{
+		href: "/admin/costs/azure",
+		label: "Azure Preise",
+		icon: Coins,
+	},
+	{
 		href: "/admin/models",
 		label: "Modelle",
 		icon: Boxes,

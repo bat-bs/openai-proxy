@@ -256,3 +256,52 @@ export const costs = pgTable(
 		),
 	],
 );
+
+export const azurePricingConfig = pgTable("azure_pricing_config", {
+	id: integer().primaryKey().default(1),
+	serviceName: varchar("service_name", { length: 255 })
+		.notNull()
+		.default("Azure OpenAI"),
+	armRegionName: varchar("arm_region_name", { length: 255 }).notNull(),
+	currencyCode: char("currency_code", { length: 3 }).notNull(),
+	productName: varchar("product_name", { length: 255 }),
+	armSkuName: varchar("arm_sku_name", { length: 255 }),
+	meterName: varchar("meter_name", { length: 255 }),
+	priceType: varchar("price_type", { length: 32 })
+		.notNull()
+		.default("Consumption"),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+		.defaultNow()
+		.notNull(),
+});
+
+export const azurePricingRules = pgTable("azure_pricing_rules", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+	name: varchar({ length: 255 }).notNull(),
+	enabled: boolean().notNull().default(true),
+	priority: integer().notNull().default(0),
+	action: varchar({ length: 16 }).notNull().default("map"),
+	conditions: jsonb().notNull().default(sql`'[]'::jsonb`),
+	assignments: jsonb().notNull().default(sql`'{}'::jsonb`),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+		.defaultNow()
+		.notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+		.defaultNow()
+		.notNull(),
+});
+
+export const azurePricingAudits = pgTable("azure_pricing_audits", {
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+		.defaultNow()
+		.notNull(),
+	operation: varchar({ length: 16 }).notNull(),
+	fetchedAuditId: bigint("fetched_audit_id", { mode: "number" }),
+	outcome: varchar({ length: 32 }).notNull(),
+	configuration: jsonb().notNull(),
+	rawResponse: jsonb("raw_response").notNull(),
+	counts: jsonb().notNull().default(sql`'{}'::jsonb`),
+	rows: jsonb().notNull().default(sql`'[]'::jsonb`),
+	error: text(),
+});

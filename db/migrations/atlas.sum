@@ -1,4 +1,4 @@
-h1:vsZUoaeKtCqy04645t/eYEG7t+6TZmrZPadGjkmA+50=
+h1:AZtd/W6Q1UHgZmpWt3qfPAu1GerPYyTC8uvKPKkug38=
 20240924151008_init.sql h1:rTjsfTqruGXjIUITaR6Pqt0n4lm+4EcdvESuYXgmyP4=
 20240924154252_request_monitoring.sql h1:VWH6kcc2DWS7L9tBQ8lgS858/9f5HP7PMYZo0fZlCX8=
 20241001124048_id_datatype.sql h1:Nb1OpAzcVshPzgEqQ3w/sCFjorO4h/GTOBeuISanu4k=
@@ -26,3 +26,4 @@ h1:vsZUoaeKtCqy04645t/eYEG7t+6TZmrZPadGjkmA+50=
 20260718100000_add_request_types_and_search_units.sql h1:DB3/cpabrYd/E7x18iXCafhMqVMw5TSdvYiBJYXtV0o=
 20260818110000_add_gpt56_cache_write_accounting.sql h1:OpcV68YEKID7tO0vFeZU8loBRT3ZaqUHSJqgqiEoF/o=
 20260825120000_reporting_request_indexes.sql h1:fHCPTleO4cX5OAcwoJd4n5UJD8vWty/r4sNlItuXyVw=
+20260826100000_azure_retail_pricing.sql h1:Xd8OtUZg4VZlsYlSjLmYyxOwJVNHPXgK/Mdxft5lURc=

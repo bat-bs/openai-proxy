@@ -3,6 +3,8 @@
 ## Unreleased
 - Added separate chat-token and rerank-search reporting and dashboard charts.
 - Added request-type-aware rerank pricing management and filters.
+- Added administrator-only Azure Retail Pricing preview, rule mapping, auditing, and transactional import.
+- Added JSON export and transactional import for reusable Azure pricing mapping rules.
 
 ## 1.0.1 - 2026-07-15
 - Added provider-reported GPT-5.6 cache-write accounting across pricing, reporting, and usage views.
