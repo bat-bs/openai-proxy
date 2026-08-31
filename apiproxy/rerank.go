@@ -191,10 +191,19 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 	upstreamRequest.Header.Set("Content-Type", "application/json")
 	upstreamRequest.Header.Set("Authorization", "Bearer "+h.az.ApiKey)
 	upstreamRequest.Header.Set("X-Request-ID", requestID)
+	upstreamRequest = withRequestHealthMetadata(upstreamRequest, requestHealthMetadata{
+		Endpoint: r.URL.Path,
+		Model:    request.Model,
+	})
 
 	client := h.rerankClient
 	if client == nil {
 		client = http.DefaultClient
+	}
+	if h.health != nil {
+		clientCopy := *client
+		clientCopy.Transport = &requestHealthTransport{base: client.Transport, recorder: h.health}
+		client = &clientCopy
 	}
 	response, err := client.Do(upstreamRequest)
 	if err != nil {

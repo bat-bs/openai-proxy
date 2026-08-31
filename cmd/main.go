@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	api "openai-api-proxy/api"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -24,33 +26,31 @@ func main() {
 	db := db.DatabaseInit()
 	defer db.Close()
 
-	osExit(db)
-	defer log.Println("Closing DB Clients :)")
-
 	mux := http.NewServeMux()
 	a := auth.Init(mux, db)
-	//
-	proxy.Init(mux, db)     // Start AI Proxy
-	web.Init(mux, a)        // Start Web UI
-	api.ApiInit(mux, a, db) // Start Backend API
+	recorder := proxy.Init(mux, db) // Start AI Proxy
+	web.Init(mux, a)                // Start Web UI
+	api.ApiInit(mux, a, db)         // Start Backend API
 
 	log.Printf("Serving on http://localhost:%d", 8082)
-	log.Fatal(http.ListenAndServe(":8082", mux))
-
-}
-
-// Close DB on Program Exit
-func osExit(db *db.Database) {
+	server := &http.Server{Addr: ":8082", Handler: mux}
 	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
+	signal.Notify(sigc, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		s := <-sigc
-		log.Printf("Exit: %s Closing DB Clients :)", s)
+		log.Printf("Exit: %s", s)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("HTTP server shutdown failed: %v", err)
+		}
+		recorder.CloseContext(ctx)
 		db.Close()
-		os.Exit(1)
 	}()
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("HTTP server stopped unexpectedly: %v", err)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		recorder.CloseContext(ctx)
+		cancel()
+	}
 }

@@ -39,7 +39,7 @@ var (
 	}
 )
 
-func Init(mux *http.ServeMux, db *db.Database) {
+func Init(mux *http.ServeMux, db *db.Database) *requestHealthRecorder {
 	// Setup Azure Vars and Connection String
 	azconf := &AzureConfig{
 		DeploymentName:         os.Getenv("DEPLOYMENT_NAME"),
@@ -60,8 +60,9 @@ func Init(mux *http.ServeMux, db *db.Database) {
 		rc:           rc,
 		rerankClient: &http.Client{Timeout: azconf.RerankTimeout},
 	}
+	h.health = newRequestHealthRecorder(db)
 	mux.Handle("/api/", h)
-
+	return h.health
 }
 
 type baseHandle struct {
@@ -71,6 +72,7 @@ type baseHandle struct {
 	rerankClient           *http.Client
 	clientTokenValidator   func(http.ResponseWriter, *http.Request) bool
 	rerankEndpointOverride string
+	health                 *requestHealthRecorder
 }
 
 type ProxyDB interface {
@@ -103,11 +105,13 @@ func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend string) {
 	azureToken := h.ValidateToken(w, r)
 	if azureToken == "" {
-		http.Error(w, "Error Processing Request", http.StatusUnauthorized)
+		// ValidateToken writes the authentication error response.
 		return
 	}
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Api-Key", azureToken)
+	originalEndpoint := r.URL.Path
+	requestID := r.Header.Get("X-Request-ID")
 
 	remoteUrl := h.SetAzureUrl(r)
 	if remoteUrl == nil {
@@ -116,6 +120,9 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(remoteUrl)
+	if h.health != nil {
+		proxy.Transport = &requestHealthTransport{base: http.DefaultTransport, recorder: h.health}
+	}
 	r.Host = remoteUrl.Host
 	// Remove proxy/ingress headers that should not be forwarded to Azure.
 	// These headers are added by our ingress and clients and may be rejected
@@ -145,6 +152,13 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	// `/openai` base will produce `/openai/v1/responses` as desired.
 	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
 	ensureStreamUsageForChatCompletions(r)
+	model, streaming := captureRequestHealthRequest(r)
+	r = withRequestHealthMetadata(r, requestHealthMetadata{
+		Endpoint:  originalEndpoint,
+		Model:     model,
+		RequestID: requestID,
+		Streaming: streaming,
+	})
 
 	// Before proxying, log the intended complete URL.
 	actualURL := *remoteUrl // Make a copy of the URL struct

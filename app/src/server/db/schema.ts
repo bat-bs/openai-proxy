@@ -11,6 +11,7 @@ import {
 	pgEnum,
 	pgTable,
 	primaryKey,
+	smallint,
 	text,
 	timestamp,
 	uniqueIndex,
@@ -414,4 +415,59 @@ export const azurePricingAudits = pgTable("azure_pricing_audits", {
 	counts: jsonb().notNull().default(sql`'{}'::jsonb`),
 	rows: jsonb().notNull().default(sql`'[]'::jsonb`),
 	error: text(),
+});
+
+export const requestHealthAttempts = pgTable(
+	"request_health_attempts",
+	{
+		attemptId: varchar("attempt_id", { length: 36 }).primaryKey().notNull(),
+		requestId: varchar("request_id", { length: 255 }),
+		endpoint: varchar({ length: 255 }).notNull(),
+		upstream: varchar({ length: 255 }).notNull(),
+		model: varchar({ length: 255 }),
+		method: varchar({ length: 16 }).notNull(),
+		statusCode: smallint("status_code"),
+		outcome: varchar({ length: 32 }).notNull(),
+		durationMs: bigint("duration_ms", { mode: "number" }).notNull(),
+		firstByteDurationMs: bigint("first_byte_duration_ms", { mode: "number" }),
+		streaming: boolean().notNull().default(false),
+		clientCancelled: boolean("client_cancelled").notNull().default(false),
+		startedAt: timestamp("started_at", {
+			withTimezone: true,
+			mode: "string",
+		})
+			.defaultNow()
+			.notNull(),
+		completedAt: timestamp("completed_at", {
+			withTimezone: true,
+			mode: "string",
+		})
+			.defaultNow()
+			.notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+			.defaultNow()
+			.notNull(),
+	},
+	(table) => [
+		index("request_health_attempts_started_at_idx").on(table.startedAt),
+		index("request_health_attempts_outcome_started_at_idx").on(
+			table.outcome,
+			table.startedAt,
+		),
+		index("request_health_attempts_status_started_at_idx").on(
+			table.statusCode,
+			table.startedAt,
+		),
+	],
+);
+
+export const requestHealthSettings = pgTable("request_health_settings", {
+	id: smallint().primaryKey().default(1),
+	retentionSeconds: bigint("retention_seconds", { mode: "bigint" })
+		.notNull()
+		.default(2592000n),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+		.defaultNow()
+		.notNull(),
+	updatedBy: varchar("updated_by", { length: 255 }),
 });
