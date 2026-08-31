@@ -5,6 +5,7 @@ import {
 	Boxes,
 	Coins,
 	FileText,
+	HeartPulse,
 	KeyRound,
 	Users,
 } from "lucide-react";
@@ -25,6 +26,11 @@ const userItems = [
 		href: "/my-usage",
 		label: "Meine Nutzung",
 		icon: BarChart3,
+	},
+	{
+		href: "/service-health",
+		label: "Service Health",
+		icon: HeartPulse,
 	},
 	{
 		href: "/my-api-keys",
@@ -53,6 +59,11 @@ const adminItems = [
 		href: "/admin/models",
 		label: "Modelle",
 		icon: Boxes,
+	},
+	{
+		href: "/admin/service-health",
+		label: "Health-Aufbewahrung",
+		icon: HeartPulse,
 	},
 ];
 
