@@ -273,7 +273,7 @@ func (t *requestHealthTransport) RoundTrip(req *http.Request) (*http.Response, e
 		RequestID: requestID,
 		Endpoint:  endpoint,
 		Upstream:  req.URL.Host,
-		Model:     metadata.Model,
+		Model:     normalizeTelemetryModel(metadata.Model),
 		Method:    req.Method,
 		StartedAt: started,
 		Streaming: metadata.Streaming || requestAcceptsEventStream(req),
@@ -303,7 +303,15 @@ func (t *requestHealthTransport) RoundTrip(req *http.Request) (*http.Response, e
 	return response, nil
 }
 
-const requestHealthModelCaptureLimit = 1024 * 1024
+const requestHealthModelCaptureLimit = 3 * 1024 * 1024
+
+func requestHealthModelCaptureLimitFromEnv() int64 {
+	return positiveInt64Env("REQUEST_HEALTH_MODEL_CAPTURE_LIMIT_BYTES", requestHealthModelCaptureLimit)
+}
+
+func normalizeTelemetryModel(model string) string {
+	return strings.ToLower(strings.TrimSpace(model))
+}
 
 func captureRequestHealthModel(req *http.Request) string {
 	model, _ := captureRequestHealthRequest(req)
@@ -311,11 +319,15 @@ func captureRequestHealthModel(req *http.Request) string {
 }
 
 func captureRequestHealthRequest(req *http.Request) (string, bool) {
-	if req == nil || req.Body == nil || (req.ContentLength >= 0 && req.ContentLength > requestHealthModelCaptureLimit) {
+	return captureRequestHealthRequestWithLimit(req, requestHealthModelCaptureLimit)
+}
+
+func captureRequestHealthRequestWithLimit(req *http.Request, limit int64) (string, bool) {
+	if limit <= 0 || req == nil || req.Body == nil || (req.ContentLength >= 0 && req.ContentLength > limit) {
 		return "", false
 	}
-	body, err := io.ReadAll(io.LimitReader(req.Body, requestHealthModelCaptureLimit+1))
-	if err != nil || int64(len(body)) > requestHealthModelCaptureLimit {
+	body, err := io.ReadAll(io.LimitReader(req.Body, limit+1))
+	if err != nil || int64(len(body)) > limit {
 		req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), req.Body))
 		return "", false
 	}
@@ -327,7 +339,7 @@ func captureRequestHealthRequest(req *http.Request) (string, bool) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", false
 	}
-	return strings.TrimSpace(payload.Model), payload.Stream != nil && *payload.Stream
+	return normalizeTelemetryModel(payload.Model), payload.Stream != nil && *payload.Stream
 }
 
 type requestHealthBody struct {

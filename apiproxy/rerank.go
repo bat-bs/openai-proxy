@@ -193,7 +193,7 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 	upstreamRequest.Header.Set("X-Request-ID", requestID)
 	upstreamRequest = withRequestHealthMetadata(upstreamRequest, requestHealthMetadata{
 		Endpoint: r.URL.Path,
-		Model:    request.Model,
+		Model:    normalizeTelemetryModel(request.Model),
 	})
 
 	client := h.rerankClient
@@ -287,7 +287,7 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 			ApiKeyID:       apiKeyID,
 			RequestType:    db.RequestTypeRerank,
 			SearchUnits:    &searchUnits,
-			Model:          request.Model,
+			Model:          normalizeTelemetryModel(request.Model),
 			IsApproximated: false,
 		}
 		if err := h.db.WriteRerankRequest(&rq); err != nil {

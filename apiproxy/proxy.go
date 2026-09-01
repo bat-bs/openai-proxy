@@ -23,6 +23,7 @@ type AzureConfig struct {
 	RerankTimeout          time.Duration
 	RerankMaxRequestBytes  int64
 	RerankMaxResponseBytes int64
+	ModelCaptureLimitBytes int64
 }
 
 var (
@@ -49,6 +50,7 @@ func Init(mux *http.ServeMux, db *db.Database) *requestHealthRecorder {
 		RerankTimeout:          rerankTimeoutFromEnv(),
 		RerankMaxRequestBytes:  rerankMaxRequestBytesFromEnv(),
 		RerankMaxResponseBytes: rerankMaxResponseBytesFromEnv(),
+		ModelCaptureLimitBytes: requestHealthModelCaptureLimitFromEnv(),
 	}
 	defaultBackend = os.Getenv("DEFAULT_BACKEND")
 	rc := &ResponseConf{
@@ -152,7 +154,11 @@ func (h *baseHandle) HandleAzure(w http.ResponseWriter, r *http.Request, backend
 	// `/openai` base will produce `/openai/v1/responses` as desired.
 	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api")
 	ensureStreamUsageForChatCompletions(r)
-	model, streaming := captureRequestHealthRequest(r)
+	captureLimit := h.az.ModelCaptureLimitBytes
+	if captureLimit <= 0 {
+		captureLimit = requestHealthModelCaptureLimit
+	}
+	model, streaming := captureRequestHealthRequestWithLimit(r, captureLimit)
 	r = withRequestHealthMetadata(r, requestHealthMetadata{
 		Endpoint:  originalEndpoint,
 		Model:     model,

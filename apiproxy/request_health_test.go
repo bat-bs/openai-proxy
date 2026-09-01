@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -285,5 +286,26 @@ func TestCaptureRequestHealthRequestUsesStreamField(t *testing.T) {
 				t.Fatalf("got model=%q streaming=%t", model, streaming)
 			}
 		})
+	}
+}
+
+func TestCaptureRequestHealthRequestNormalizesModel(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "https://example.test", strings.NewReader(`{"model":"  GPT-5-Mini  "}`))
+
+	model, _ := captureRequestHealthRequest(req)
+	if model != "gpt-5-mini" {
+		t.Fatalf("got model %q, want %q", model, "gpt-5-mini")
+	}
+}
+
+func TestRequestHealthModelCaptureLimitFromEnv(t *testing.T) {
+	t.Setenv("REQUEST_HEALTH_MODEL_CAPTURE_LIMIT_BYTES", "1234")
+	if got := requestHealthModelCaptureLimitFromEnv(); got != 1234 {
+		t.Fatalf("got limit %d, want 1234", got)
+	}
+
+	t.Setenv("REQUEST_HEALTH_MODEL_CAPTURE_LIMIT_BYTES", "0")
+	if got := requestHealthModelCaptureLimitFromEnv(); got != requestHealthModelCaptureLimit {
+		t.Fatalf("got invalid-value fallback %d, want %d", got, requestHealthModelCaptureLimit)
 	}
 }

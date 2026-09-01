@@ -264,13 +264,15 @@ export const serviceHealthRouter = createTRPCRouter({
 					.limit(maxBreakdownRows),
 				ctx.db
 					.select({
-						model: sql<string>`coalesce(${requestHealthAttempts.model}, 'Unknown')`,
+						model: sql<string>`coalesce(nullif(lower(trim(${requestHealthAttempts.model})), ''), 'Unknown')`,
 						count: sql<number>`count(*)::int`,
 						unsuccessful: sql<number>`count(*) filter (where ${unsuccessfulCondition})::int`,
 					})
 					.from(requestHealthAttempts)
 					.where(filter)
-					.groupBy(sql`coalesce(${requestHealthAttempts.model}, 'Unknown')`)
+					.groupBy(
+						sql`coalesce(nullif(lower(trim(${requestHealthAttempts.model})), ''), 'Unknown')`,
+					)
 					.orderBy(desc(sql`count(*)`))
 					.limit(maxBreakdownRows),
 				(() => {
