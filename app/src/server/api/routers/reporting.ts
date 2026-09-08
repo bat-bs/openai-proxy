@@ -42,6 +42,10 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 const reportRangeInput = z.discriminatedUnion("type", [
 	z.object({
+		type: z.literal("live"),
+		start: z.string().datetime({ offset: true }),
+	}),
+	z.object({
 		type: z.literal("daily"),
 		date: z
 			.string()
@@ -69,8 +73,18 @@ const reportRangeInput = z.discriminatedUnion("type", [
 const normalize = (value: string | null | undefined) =>
 	(value ?? "").trim().toLowerCase();
 
-function getDateRange(input: z.infer<typeof reportRangeInput>) {
+function getDateRange(
+	input: z.infer<typeof reportRangeInput>,
+	now = new Date(),
+) {
 	switch (input.type) {
+		case "live": {
+			const start = new Date(input.start);
+			if (!Number.isFinite(start.getTime()) || start >= now) {
+				throw new TRPCError({ code: "BAD_REQUEST" });
+			}
+			return { start, end: now, isLive: true };
+		}
 		case "daily": {
 			const parts = input.date.split("-").map(Number);
 			const year = parts[0];
@@ -88,7 +102,7 @@ function getDateRange(input: z.infer<typeof reportRangeInput>) {
 			}
 			const start = new Date(Date.UTC(year, month - 1, day));
 			const end = new Date(Date.UTC(year, month - 1, day + 1));
-			return { start, end };
+			return { start, end, isLive: false };
 		}
 		case "monthly": {
 			const parts = input.month.split("-").map(Number);
@@ -104,21 +118,21 @@ function getDateRange(input: z.infer<typeof reportRangeInput>) {
 			}
 			const start = new Date(Date.UTC(year, month - 1, 1));
 			const end = new Date(Date.UTC(year, month, 1));
-			return { start, end };
+			return { start, end, isLive: false };
 		}
 		case "quarterly": {
 			const startMonth = (input.quarter - 1) * 3;
 			const start = new Date(Date.UTC(input.year, startMonth, 1));
 			const end = new Date(Date.UTC(input.year, startMonth + 3, 1));
-			return { start, end };
+			return { start, end, isLive: false };
 		}
 		case "yearly": {
 			const start = new Date(Date.UTC(input.year, 0, 1));
 			const end = new Date(Date.UTC(input.year + 1, 0, 1));
-			return { start, end };
+			return { start, end, isLive: false };
 		}
 		default:
-			return { start: new Date(0), end: new Date() };
+			return { start: new Date(0), end: now, isLive: false };
 	}
 }
 
@@ -407,7 +421,7 @@ export const reportingRouter = createTRPCRouter({
 				}
 			}
 
-			const { start, end } = getDateRange(input.range);
+			const { start, end, isLive } = getDateRange(input.range);
 			const dayCount = Math.max(
 				1,
 				Math.ceil((end.getTime() - start.getTime()) / 86_400_000),
@@ -460,7 +474,9 @@ export const reportingRouter = createTRPCRouter({
 				}
 			}
 
-			await ensureRequestStatisticsCache(ctx.db, start, end);
+			await ensureRequestStatisticsCache(ctx.db, start, end, {
+				refreshCurrentBucket: isLive,
+			});
 
 			type UserModel = {
 				model: string;

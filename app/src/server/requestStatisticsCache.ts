@@ -484,6 +484,7 @@ async function populate(
 	start: Date,
 	end: Date,
 	force: boolean,
+	refreshCurrentBucket = false,
 ) {
 	const buckets = listBuckets(start, end);
 	if (!buckets.length) return;
@@ -513,9 +514,15 @@ async function populate(
 			.filter((marker) => marker.invalidatedAt === null)
 			.map((marker) => new Date(marker.bucketStart).getTime()),
 	);
+	const currentBucket = floorUtcHour(new Date());
 	const missingBuckets = force
 		? buckets
-		: buckets.filter((bucket) => !validBuckets.has(bucket.getTime()));
+		: buckets.filter(
+				(bucket) =>
+					(refreshCurrentBucket &&
+						bucket.getTime() === currentBucket.getTime()) ||
+					!validBuckets.has(bucket.getTime()),
+			);
 	if (!missingBuckets.length) return;
 
 	const costStageRows = await loadCostRows(database);
@@ -569,8 +576,15 @@ export async function ensureRequestStatisticsCache(
 	database: AppDatabase,
 	start: Date,
 	end: Date,
+	options: { refreshCurrentBucket?: boolean } = {},
 ) {
-	await populate(database, start, end, false);
+	await populate(
+		database,
+		start,
+		end,
+		false,
+		options.refreshCurrentBucket ?? false,
+	);
 }
 
 export async function rebuildRequestStatisticsCache(
