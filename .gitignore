@@ -11,3 +11,5 @@ vendor/
 
 local-dev/postgres-data-fresh
 tmp/
+.cache/
+worktrees/

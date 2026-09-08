@@ -51,7 +51,7 @@ const chartColors = [
 	"var(--chart-5)",
 ];
 
-type Timeframe = "daily" | "monthly" | "quarterly" | "yearly";
+type Timeframe = "live" | "daily" | "monthly" | "quarterly" | "yearly";
 
 type SortKey =
 	| "name"
@@ -70,11 +70,20 @@ type CumulativeCosts = {
 };
 
 const timeframeOptions = [
+	{ value: "live", label: "Heute (live)" },
 	{ value: "daily", label: "Täglich" },
 	{ value: "monthly", label: "Monatlich" },
 	{ value: "quarterly", label: "Quartal" },
 	{ value: "yearly", label: "Jährlich" },
 ] as const;
+
+function localMidnightIso(date: Date) {
+	return new Date(
+		date.getFullYear(),
+		date.getMonth(),
+		date.getDate(),
+	).toISOString();
+}
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
@@ -98,13 +107,32 @@ export function ReportingCreateClient({
 	const [selectedApiKeyIds, setSelectedApiKeyIds] = useState<string[]>([]);
 	const [allApiKeys, setAllApiKeys] = useState(true);
 
-	const now = useMemo(() => new Date(), []);
+	const [now, setNow] = useState(() => new Date());
+
+	useEffect(() => {
+		let timeoutId: number;
+		const scheduleNextMidnight = () => {
+			const nextMidnight = new Date();
+			nextMidnight.setHours(24, 0, 0, 0);
+			timeoutId = window.setTimeout(
+				() => {
+					setNow(new Date());
+					scheduleNextMidnight();
+				},
+				Math.max(1_000, nextMidnight.getTime() - Date.now()),
+			);
+		};
+
+		scheduleNextMidnight();
+		return () => window.clearTimeout(timeoutId);
+	}, []);
+
 	const currentYear = now.getFullYear();
 	const currentMonth = now.getMonth() + 1;
 	const currentDay = now.getDate();
 	const currentQuarter = Math.floor((now.getMonth() + 3) / 3);
 
-	const [timeframe, setTimeframe] = useState<Timeframe>("monthly");
+	const [timeframe, setTimeframe] = useState<Timeframe>("live");
 	const [dailyDate, setDailyDate] = useState(
 		`${currentYear}-${pad(currentMonth)}-${pad(currentDay)}`,
 	);
@@ -144,6 +172,68 @@ export function ReportingCreateClient({
 	}, [groups, isAdmin]);
 
 	const [selectedGroupId, setSelectedGroupId] = useState<string>("");
+	const [urlStateInitialized, setUrlStateInitialized] = useState(false);
+
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const savedTimeframe = params.get("range") as Timeframe | null;
+		if (
+			savedTimeframe &&
+			timeframeOptions.some(({ value }) => value === savedTimeframe)
+		) {
+			setTimeframe(savedTimeframe);
+			if (savedTimeframe === "daily")
+				setDailyDate(
+					params.get("date") ??
+						`${currentYear}-${pad(currentMonth)}-${pad(currentDay)}`,
+				);
+			if (savedTimeframe === "monthly")
+				setMonthValue(
+					params.get("month") ?? `${currentYear}-${pad(currentMonth)}`,
+				);
+			if (savedTimeframe === "quarterly") {
+				setQuarterYear(Number(params.get("year")) || currentYear);
+				setQuarterValue(Number(params.get("quarter")) || currentQuarter);
+			}
+			if (savedTimeframe === "yearly")
+				setYearValue(Number(params.get("year")) || currentYear);
+		}
+		setUrlStateInitialized(true);
+		// Read the URL once; subsequent changes are written by the effect below.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [currentDay, currentMonth, currentQuarter, currentYear]);
+
+	useEffect(() => {
+		if (!urlStateInitialized) return;
+		const params = new URLSearchParams(window.location.search);
+		for (const key of ["range", "date", "month", "year", "quarter"]) {
+			params.delete(key);
+		}
+		if (timeframe !== "live") {
+			params.set("range", timeframe);
+			if (timeframe === "daily") params.set("date", dailyDate);
+			if (timeframe === "monthly") params.set("month", monthValue);
+			if (timeframe === "quarterly") {
+				params.set("year", String(quarterYear));
+				params.set("quarter", String(quarterValue));
+			}
+			if (timeframe === "yearly") params.set("year", String(yearValue));
+		}
+		const query = params.toString();
+		window.history.replaceState(
+			null,
+			"",
+			query ? `?${query}` : window.location.pathname,
+		);
+	}, [
+		dailyDate,
+		monthValue,
+		quarterValue,
+		quarterYear,
+		timeframe,
+		urlStateInitialized,
+		yearValue,
+	]);
 
 	useEffect(() => {
 		if (selectedGroupId) return;
@@ -158,6 +248,8 @@ export function ReportingCreateClient({
 
 	const reportRange = useMemo(() => {
 		switch (timeframe) {
+			case "live":
+				return { type: "live" as const, start: localMidnightIso(now) };
 			case "daily":
 				return { type: "daily" as const, date: dailyDate };
 			case "monthly":
@@ -171,11 +263,20 @@ export function ReportingCreateClient({
 			case "yearly":
 				return { type: "yearly" as const, year: Number(yearValue) };
 			default:
-				return { type: "monthly" as const, month: monthValue };
+				return { type: "live" as const, start: localMidnightIso(now) };
 		}
-	}, [dailyDate, monthValue, quarterValue, quarterYear, timeframe, yearValue]);
+	}, [
+		dailyDate,
+		monthValue,
+		now,
+		quarterValue,
+		quarterYear,
+		timeframe,
+		yearValue,
+	]);
 
 	const selectedPeriodEnd = useMemo(() => {
+		if (timeframe === "live") return now;
 		switch (timeframe) {
 			case "daily": {
 				const [year, month, day] = dailyDate.split("-").map(Number);
@@ -197,7 +298,15 @@ export function ReportingCreateClient({
 			default:
 				return null;
 		}
-	}, [dailyDate, monthValue, quarterValue, quarterYear, timeframe, yearValue]);
+	}, [
+		dailyDate,
+		monthValue,
+		now,
+		quarterValue,
+		quarterYear,
+		timeframe,
+		yearValue,
+	]);
 
 	const isPeriodOpen = useMemo(() => {
 		if (!selectedPeriodEnd) return false;
@@ -214,7 +323,10 @@ export function ReportingCreateClient({
 				allApiKeys,
 			},
 			{
-				enabled: reportEnabled && (isSelf || isAdmin || groups.length > 0),
+				enabled:
+					urlStateInitialized &&
+					reportEnabled &&
+					(isSelf || isAdmin || groups.length > 0),
 			},
 		);
 
