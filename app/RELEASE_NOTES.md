@@ -1,6 +1,7 @@
 # Release Notes
 
 ## Unreleased
+- Added an authenticated model discovery page with copyable model IDs and an API example.
 - Made the usage dashboard the authenticated landing page.
 - Added an authenticated service-health dashboard with local range controls and admin-configurable retention with immediate purge.
 - Added lazy, exact hourly request-statistics caching for faster administrator reports, with pricing invalidation and manual UTC-range rebuilds.

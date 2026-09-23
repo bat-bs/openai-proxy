@@ -1,5 +1,6 @@
 import { adminRouter } from "~/server/api/routers/admin";
 import { apiKeyRouter } from "~/server/api/routers/api-key";
+import { modelsRouter } from "~/server/api/routers/models";
 import { postRouter } from "~/server/api/routers/post";
 import { reportingRouter } from "~/server/api/routers/reporting";
 import { serviceHealthRouter } from "~/server/api/routers/service-health";
@@ -14,6 +15,7 @@ export const appRouter = createTRPCRouter({
 	admin: adminRouter,
 	post: postRouter,
 	apiKey: apiKeyRouter,
+	models: modelsRouter,
 	reporting: reportingRouter,
 	serviceHealth: serviceHealthRouter,
 });
