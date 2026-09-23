@@ -7,6 +7,7 @@ import {
 	FileText,
 	HeartPulse,
 	KeyRound,
+	Search,
 	Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -36,6 +37,11 @@ const userItems = [
 		href: "/my-api-keys",
 		label: "Meine API-Schlüssel",
 		icon: KeyRound,
+	},
+	{
+		href: "/models",
+		label: "Modelle entdecken",
+		icon: Search,
 	},
 ];
 
