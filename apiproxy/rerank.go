@@ -1,6 +1,7 @@
 package apiproxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,11 +24,10 @@ const (
 )
 
 type RerankRequest struct {
-	Model           string   `json:"model"`
-	Query           string   `json:"query"`
-	Documents       []string `json:"documents"`
-	TopN            *int     `json:"top_n,omitempty"`
-	ReturnDocuments *bool    `json:"return_documents,omitempty"`
+	Model     string   `json:"model"`
+	Query     string   `json:"query"`
+	Documents []string `json:"documents"`
+	TopN      *int     `json:"top_n,omitempty"`
 }
 
 type rerankUpstreamResponse struct {
@@ -45,24 +45,8 @@ type rerankBilledUnits struct {
 }
 
 type rerankUpstreamResult struct {
-	Index          int             `json:"index"`
-	RelevanceScore float64         `json:"relevance_score"`
-	Document       *RerankDocument `json:"document,omitempty"`
-}
-
-type RerankDocument struct {
-	Text string `json:"text"`
-}
-
-type rerankResponse struct {
-	ID      string         `json:"id,omitempty"`
-	Results []RerankResult `json:"results"`
-}
-
-type RerankResult struct {
-	Index          int             `json:"index"`
-	RelevanceScore float64         `json:"relevance_score"`
-	Document       *RerankDocument `json:"document"`
+	Index          int     `json:"index"`
+	RelevanceScore float64 `json:"relevance_score"`
 }
 
 func rerankTimeoutFromEnv() time.Duration {
@@ -135,13 +119,18 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 	if h.az.RerankMaxRequestBytes > 0 {
 		r.Body = http.MaxBytesReader(w, r.Body, h.az.RerankMaxRequestBytes)
 	}
-	var request RerankRequest
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&request); err != nil {
+	requestBody, err := io.ReadAll(r.Body)
+	if err != nil {
 		if isMaxBytesError(err) {
 			writeRerankError(w, http.StatusRequestEntityTooLarge, "rerank request body is too large", "request_too_large")
 			return
 		}
+		writeRerankError(w, http.StatusBadRequest, "could not read rerank request body", "invalid_request")
+		return
+	}
+	var request RerankRequest
+	decoder := json.NewDecoder(bytes.NewReader(requestBody))
+	if err := decoder.Decode(&request); err != nil {
 		writeRerankError(w, http.StatusBadRequest, "request body must be valid JSON", "invalid_request")
 		return
 	}
@@ -150,6 +139,15 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 	var trailing interface{}
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		writeRerankError(w, http.StatusBadRequest, "request body must contain exactly one JSON value", "invalid_request")
+		return
+	}
+	var requestFields map[string]json.RawMessage
+	if err := json.Unmarshal(requestBody, &requestFields); err != nil {
+		writeRerankError(w, http.StatusBadRequest, "request body must be a JSON object", "invalid_request")
+		return
+	}
+	if _, found := requestFields["return_documents"]; found {
+		writeRerankError(w, http.StatusBadRequest, "return_documents is not supported by Cohere v2", "invalid_request")
 		return
 	}
 	if err := validateRerankRequest(&request); err != nil {
@@ -178,12 +176,7 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := json.Marshal(request)
-	if err != nil {
-		writeRerankError(w, http.StatusInternalServerError, "could not encode rerank request", "internal_error")
-		return
-	}
-	upstreamRequest, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target.String(), strings.NewReader(string(body)))
+	upstreamRequest, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target.String(), bytes.NewReader(requestBody))
 	if err != nil {
 		writeRerankError(w, http.StatusInternalServerError, "could not create rerank request", "internal_error")
 		return
@@ -252,11 +245,6 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	translated := rerankResponse{
-		ID:      upstream.ID,
-		Results: make([]RerankResult, 0, len(upstream.Results)),
-	}
-	includeDocuments := request.ReturnDocuments != nil && *request.ReturnDocuments
 	for _, result := range upstream.Results {
 		if math.IsNaN(result.RelevanceScore) || math.IsInf(result.RelevanceScore, 0) {
 			writeRerankError(w, http.StatusBadGateway, "rerank upstream returned an invalid relevance score", "upstream_contract_error")
@@ -266,18 +254,6 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 			writeRerankError(w, http.StatusBadGateway, fmt.Sprintf("rerank upstream returned invalid document index %d", result.Index), "upstream_error")
 			return
 		}
-		var document *RerankDocument
-		if includeDocuments {
-			document = result.Document
-			if document == nil {
-				document = &RerankDocument{Text: request.Documents[result.Index]}
-			}
-		}
-		translated.Results = append(translated.Results, RerankResult{
-			Index:          result.Index,
-			RelevanceScore: result.RelevanceScore,
-			Document:       document,
-		})
 	}
 
 	searchUnits := *upstream.Meta.BilledUnits.SearchUnits
@@ -298,7 +274,7 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(translated); err != nil {
+	if _, err := w.Write(upstreamBody); err != nil {
 		return
 	}
 }
