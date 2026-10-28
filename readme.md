@@ -37,7 +37,8 @@ curl "http://localhost:8082/api/chat/completions" \
 Reranking uses the same `DEPLOYMENT_NAME`, `BASE_URL`, and `AZURE_API_KEY`
 configuration as the Azure OpenAI proxy. `BASE_URL` is the shared Azure domain
 suffix, for example `azure.com`. The proxy exposes reranking at
-`/api/v1/rerank`:
+`/api/v2/rerank`. The unversioned `/api/rerank` path is also available and uses
+the same Cohere v2 contract. The retired `/api/v1/rerank` path returns 404.
 
 The Rerank model must be registered in the admin model catalog as type
 `RERANK`. The current pricing policy for `Cohere-rerank-v4.0-fast` is `$2 per
@@ -45,7 +46,7 @@ The Rerank model must be registered in the admin model catalog as type
 for other Cohere models.
 
 ```bash
-curl "http://localhost:8082/api/v1/rerank" \
+curl "http://localhost:8082/api/v2/rerank" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <Key-From-Web-UI>" \
   -d '{
