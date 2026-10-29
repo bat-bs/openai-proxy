@@ -24,10 +24,19 @@ const (
 )
 
 type RerankRequest struct {
-	Model     string   `json:"model"`
-	Query     string   `json:"query"`
-	Documents []string `json:"documents"`
-	TopN      *int     `json:"top_n,omitempty"`
+	Model           string               `json:"model"`
+	Query           string               `json:"query"`
+	Documents       []string             `json:"documents"`
+	TopN            *int                 `json:"top_n,omitempty"`
+	MaxTokensPerDoc *int                 `json:"max_tokens_per_doc,omitempty"`
+	Priority        *int                 `json:"priority,omitempty"`
+	RelevantSpans   *RerankRelevantSpans `json:"relevant_spans,omitempty"`
+}
+
+type RerankRelevantSpans struct {
+	Mode      string   `json:"mode"`
+	Threshold *float64 `json:"threshold,omitempty"`
+	MaxSpans  *int     `json:"max_spans,omitempty"`
 }
 
 type rerankUpstreamResponse struct {
@@ -119,18 +128,18 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 	if h.az.RerankMaxRequestBytes > 0 {
 		r.Body = http.MaxBytesReader(w, r.Body, h.az.RerankMaxRequestBytes)
 	}
-	requestBody, err := io.ReadAll(r.Body)
-	if err != nil {
+	var request RerankRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
 		if isMaxBytesError(err) {
 			writeRerankError(w, http.StatusRequestEntityTooLarge, "rerank request body is too large", "request_too_large")
 			return
 		}
-		writeRerankError(w, http.StatusBadRequest, "could not read rerank request body", "invalid_request")
-		return
-	}
-	var request RerankRequest
-	decoder := json.NewDecoder(bytes.NewReader(requestBody))
-	if err := decoder.Decode(&request); err != nil {
+		if isUnknownFieldError(err) {
+			writeRerankError(w, http.StatusBadRequest, "request contains a field that is not supported by the Cohere v2 rerank API", "invalid_request")
+			return
+		}
 		writeRerankError(w, http.StatusBadRequest, "request body must be valid JSON", "invalid_request")
 		return
 	}
@@ -139,15 +148,6 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 	var trailing interface{}
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		writeRerankError(w, http.StatusBadRequest, "request body must contain exactly one JSON value", "invalid_request")
-		return
-	}
-	var requestFields map[string]json.RawMessage
-	if err := json.Unmarshal(requestBody, &requestFields); err != nil {
-		writeRerankError(w, http.StatusBadRequest, "request body must be a JSON object", "invalid_request")
-		return
-	}
-	if _, found := requestFields["return_documents"]; found {
-		writeRerankError(w, http.StatusBadRequest, "return_documents is not supported by Cohere v2", "invalid_request")
 		return
 	}
 	if err := validateRerankRequest(&request); err != nil {
@@ -176,7 +176,16 @@ func (h *baseHandle) HandleRerank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstreamRequest, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target.String(), bytes.NewReader(requestBody))
+	// Forward the validated request instead of the raw client body, so that
+	// upstream receives exactly the model and documents that were checked and
+	// billed (encoding/json matches keys case-insensitively and lets duplicate
+	// keys override earlier ones).
+	body, err := json.Marshal(request)
+	if err != nil {
+		writeRerankError(w, http.StatusInternalServerError, "could not encode rerank request", "internal_error")
+		return
+	}
+	upstreamRequest, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target.String(), bytes.NewReader(body))
 	if err != nil {
 		writeRerankError(w, http.StatusInternalServerError, "could not create rerank request", "internal_error")
 		return
@@ -312,6 +321,23 @@ func validateRerankRequest(request *RerankRequest) error {
 	if request.TopN != nil && (*request.TopN < 1 || *request.TopN > len(request.Documents)) {
 		return fmt.Errorf("top_n must be between 1 and the number of documents")
 	}
+	if request.MaxTokensPerDoc != nil && *request.MaxTokensPerDoc < 1 {
+		return fmt.Errorf("max_tokens_per_doc must be at least 1")
+	}
+	if request.Priority != nil && *request.Priority < 0 {
+		return fmt.Errorf("priority must not be negative")
+	}
+	if spans := request.RelevantSpans; spans != nil {
+		if spans.Mode != "enabled" && spans.Mode != "disabled" {
+			return fmt.Errorf("relevant_spans.mode must be \"enabled\" or \"disabled\"")
+		}
+		if spans.Threshold != nil && (*spans.Threshold < 0 || *spans.Threshold > 1) {
+			return fmt.Errorf("relevant_spans.threshold must be between 0 and 1")
+		}
+		if spans.MaxSpans != nil && *spans.MaxSpans < 1 {
+			return fmt.Errorf("relevant_spans.max_spans must be at least 1")
+		}
+	}
 	return nil
 }
 
@@ -343,6 +369,12 @@ func (h *baseHandle) rerankURL() (*url.URL, error) {
 func isMaxBytesError(err error) bool {
 	var maxBytesError *http.MaxBytesError
 	return errors.As(err, &maxBytesError)
+}
+
+// encoding/json reports DisallowUnknownFields violations only as an untyped
+// error with this message prefix.
+func isUnknownFieldError(err error) bool {
+	return strings.HasPrefix(err.Error(), "json: unknown field ")
 }
 
 func writeRerankError(w http.ResponseWriter, status int, message string, code string) {

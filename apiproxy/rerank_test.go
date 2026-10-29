@@ -12,14 +12,16 @@ import (
 )
 
 type rerankTestDB struct {
-	writeErr  error
-	request   *db.Request
-	modelType string
+	writeErr      error
+	request       *db.Request
+	modelType     string
+	lookedUpModel string
 }
 
 func (d *rerankTestDB) LookupApiKeys(string) ([]db.ApiKey, error) { return nil, nil }
 func (d *rerankTestDB) ListConfiguredModels() ([]string, error)   { return nil, nil }
-func (d *rerankTestDB) LookupConfiguredModelType(string) (string, bool, error) {
+func (d *rerankTestDB) LookupConfiguredModelType(model string) (string, bool, error) {
+	d.lookedUpModel = model
 	modelType := d.modelType
 	if modelType == "" {
 		modelType = db.ModelTypeRerank
@@ -114,7 +116,7 @@ func TestHandleRerank_ForwardsV2RequestAndResponse(t *testing.T) {
 		t.Fatalf("expected top_n=2, got %v", gotRequest.TopN)
 	}
 	if gotRequestBody != requestBody {
-		t.Fatalf("expected the original v2 JSON body to be forwarded unchanged; got %s", gotRequestBody)
+		t.Fatalf("expected the validated v2 request to be forwarded with all fields; got %s", gotRequestBody)
 	}
 
 	if !bytes.Equal(recorder.Body.Bytes(), upstreamResponse) {
@@ -174,14 +176,54 @@ func TestServeHTTP_RetiredV1RerankRoutesReturnNotFound(t *testing.T) {
 	}
 }
 
-func TestHandleRerank_RejectsReturnDocuments(t *testing.T) {
-	called := false
-	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		called = true
+func TestHandleRerank_RejectsUnsupportedFields(t *testing.T) {
+	for name, body := range map[string]string{
+		"return_documents":        `{"model":"test-model","query":"query","documents":["document"],"return_documents":false}`,
+		"case variant":            `{"model":"test-model","query":"query","documents":["document"],"Return_Documents":true}`,
+		"unknown top-level field": `{"model":"test-model","query":"query","documents":["document"],"rank_fields":["text"]}`,
+		"unknown nested field":    `{"model":"test-model","query":"query","documents":["document"],"relevant_spans":{"mode":"enabled","extra":1}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			called := false
+			upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				called = true
+			}))
+			defer upstream.Close()
+
+			h := &baseHandle{
+				az:                     &AzureConfig{ApiKey: "azure-key"},
+				rerankClient:           upstream.Client(),
+				rerankEndpointOverride: upstream.URL,
+				clientTokenValidator: func(http.ResponseWriter, *http.Request) bool {
+					return true
+				},
+			}
+			req := httptest.NewRequest(http.MethodPost, "http://proxy/api/v2/rerank", strings.NewReader(body))
+			recorder := httptest.NewRecorder()
+
+			h.HandleRerank(recorder, req)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for unsupported field, got %d: %s", recorder.Code, recorder.Body.String())
+			}
+			if called {
+				t.Fatal("request with unsupported field should be rejected before calling upstream")
+			}
+		})
+	}
+}
+
+func TestHandleRerank_ForwardsValidatedModelAndDocuments(t *testing.T) {
+	var gotRequestBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRequestBody, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"id":"rerank-test","results":[{"index":0,"relevance_score":0.5}],"meta":{"billed_units":{"search_units":1}}}`))
 	}))
 	defer upstream.Close()
 
+	store := &rerankTestDB{}
 	h := &baseHandle{
+		db:                     store,
 		az:                     &AzureConfig{ApiKey: "azure-key"},
 		rerankClient:           upstream.Client(),
 		rerankEndpointOverride: upstream.URL,
@@ -189,16 +231,64 @@ func TestHandleRerank_RejectsReturnDocuments(t *testing.T) {
 			return true
 		},
 	}
-	req := httptest.NewRequest(http.MethodPost, "http://proxy/api/v2/rerank", strings.NewReader(`{"model":"test-model","query":"query","documents":["document"],"return_documents":false}`))
+	// encoding/json matches keys case-insensitively and the last duplicate
+	// wins, so the proxy validates "registered-model" and one document.
+	body := `{"model":"unregistered-model","Model":"registered-model","query":"query","documents":["a","b","c"],"Documents":["a"]}`
+	req := httptest.NewRequest(http.MethodPost, "http://proxy/api/v2/rerank", strings.NewReader(body))
 	recorder := httptest.NewRecorder()
 
 	h.HandleRerank(recorder, req)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for return_documents, got %d", recorder.Code)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	if called {
-		t.Fatal("return_documents request should be rejected before calling upstream")
+	if store.lookedUpModel != "registered-model" {
+		t.Fatalf("expected registered-model to be checked, got %q", store.lookedUpModel)
+	}
+	var forwarded map[string]json.RawMessage
+	if err := json.Unmarshal(gotRequestBody, &forwarded); err != nil {
+		t.Fatalf("failed to decode upstream request: %v", err)
+	}
+	if string(forwarded["model"]) != `"registered-model"` || string(forwarded["documents"]) != `["a"]` {
+		t.Fatalf("upstream must receive the validated model and documents, got %s", gotRequestBody)
+	}
+	if _, found := forwarded["Model"]; found || bytes.Contains(gotRequestBody, []byte("unregistered-model")) {
+		t.Fatalf("upstream must not receive unvalidated keys, got %s", gotRequestBody)
+	}
+}
+
+func TestValidateRerankRequest_V2Fields(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
+	floatPtr := func(v float64) *float64 { return &v }
+	valid := func() RerankRequest {
+		return RerankRequest{Model: "test-model", Query: "query", Documents: []string{"document"}}
+	}
+
+	for name, tc := range map[string]struct {
+		mutate  func(*RerankRequest)
+		wantErr bool
+	}{
+		"defaults": {mutate: func(*RerankRequest) {}},
+		"all v2 fields": {mutate: func(r *RerankRequest) {
+			r.MaxTokensPerDoc, r.Priority, r.RelevantSpans = intPtr(4096), intPtr(0), &RerankRelevantSpans{Mode: "enabled", Threshold: floatPtr(0.1), MaxSpans: intPtr(2)}
+		}},
+		"max_tokens_per_doc zero": {mutate: func(r *RerankRequest) { r.MaxTokensPerDoc = intPtr(0) }, wantErr: true},
+		"negative priority":       {mutate: func(r *RerankRequest) { r.Priority = intPtr(-1) }, wantErr: true},
+		"missing spans mode":      {mutate: func(r *RerankRequest) { r.RelevantSpans = &RerankRelevantSpans{} }, wantErr: true},
+		"unknown spans mode":      {mutate: func(r *RerankRequest) { r.RelevantSpans = &RerankRelevantSpans{Mode: "on"} }, wantErr: true},
+		"threshold above one": {mutate: func(r *RerankRequest) {
+			r.RelevantSpans = &RerankRelevantSpans{Mode: "enabled", Threshold: floatPtr(1.5)}
+		}, wantErr: true},
+		"max_spans zero": {mutate: func(r *RerankRequest) { r.RelevantSpans = &RerankRelevantSpans{Mode: "enabled", MaxSpans: intPtr(0)} }, wantErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := valid()
+			tc.mutate(&request)
+			err := validateRerankRequest(&request)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("wantErr=%v, got %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 

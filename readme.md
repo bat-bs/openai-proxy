@@ -39,6 +39,10 @@ configuration as the Azure OpenAI proxy. `BASE_URL` is the shared Azure domain
 suffix, for example `azure.com`. The proxy exposes reranking at
 `/api/v2/rerank`. The unversioned `/api/rerank` path is also available and uses
 the same Cohere v2 contract. The retired `/api/v1/rerank` path returns 404.
+The proxy accepts the Cohere v2 request fields `model`, `query`, `documents`,
+`top_n`, `max_tokens_per_doc`, `priority`, and `relevant_spans`; requests with
+any other field, including the v1-only `return_documents`, are rejected with
+400 before they reach Azure.
 
 The Rerank model must be registered in the admin model catalog as type
 `RERANK`. The current pricing policy for `Cohere-rerank-v4.0-fast` is `$2 per
