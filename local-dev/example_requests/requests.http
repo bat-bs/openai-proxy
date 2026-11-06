@@ -41,7 +41,7 @@ Authorization: Bearer <your-dev-token-here>
 }
 
 ###
-POST http://localhost:8082/api/v1/rerank
+POST http://localhost:8082/api/v2/rerank
 Content-Type: application/json
 Authorization: Bearer <your-dev-token-here>
 
