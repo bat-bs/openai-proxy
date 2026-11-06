@@ -18,7 +18,7 @@ curl -v http://localhost:8082/api/v1/responses \
 "max_output_tokens":100
 }' | jq .
 
-curl -v http://localhost:8082/api/v1/rerank \
+curl -v http://localhost:8082/api/v2/rerank \
 -H "Authorization: Bearer $LOCAL_OPENAI_API_KEY" \
 -H "Content-Type: application/json" \
 -d '{
