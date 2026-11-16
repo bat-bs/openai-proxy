@@ -86,9 +86,12 @@ type ProxyDB interface {
 }
 
 func (h *baseHandle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/api/rerank" || r.URL.Path == "/api/rerank/" ||
-		r.URL.Path == "/api/v1/rerank" || r.URL.Path == "/api/v1/rerank/" {
+	switch r.URL.Path {
+	case "/api/v2/rerank", "/api/v2/rerank/", "/api/rerank", "/api/rerank/":
 		h.HandleRerank(w, r)
+		return
+	case "/api/v1/rerank", "/api/v1/rerank/":
+		http.NotFound(w, r)
 		return
 	}
 	// Intercept OpenAI-compatible models endpoints and serve locally
